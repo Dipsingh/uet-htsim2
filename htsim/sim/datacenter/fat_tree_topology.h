@@ -277,6 +277,7 @@ public:
     virtual void add_switch_loggers(Logfile& log, simtime_picosec sample_period); 
 
     const FatTreeTopologyCfg& cfg() { return *_cfg; };
+    uint32_t no_of_nodes() const override { return _cfg->no_of_nodes(); }
 private:
     const FatTreeTopologyCfg* _cfg;
     map<Queue*,int> _link_usage;

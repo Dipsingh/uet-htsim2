@@ -1,0 +1,13 @@
+FatTree topology input file: /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/../../datacenter/topologies/fat_tree_128.topo
+traffic matrix input file: /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/../../datacenter/connection_matrices/fairness/fairness_incast_16to1_2MB.cm
+endtime(us) 100000
+random seed 42
+Packet size (MTU) is 4150
+Parsed args
+Logging to /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/results/fairness/nscc_fat_tree_128_fairness_incast_16to1_2MB.dat
+Linkspeed set to 100Gbps
+Loading connection matrix from  /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/../../datacenter/connection_matrices/fairness/fairness_incast_16to1_2MB.cm
+Nodes: 128 Connections: 128 Triggers: 0 Failures: 0
+Automatic queue sizing enabled trimming queue-size-to-bdp-factor is 1xBDP
+Error: Unknown attribute  at line 12
+Allowed attributes are: tier, downlink_speed_gbps, radix_up, radix_down, queue_up, queue_down, oversubscribed, bundle, switch_latency_ns, downlink_latency_ns

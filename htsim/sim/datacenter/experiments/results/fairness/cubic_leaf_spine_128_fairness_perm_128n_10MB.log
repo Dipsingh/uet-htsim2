@@ -1,0 +1,11 @@
+topology file: /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/../../datacenter/topologies/leaf_spine_128.topo
+traffic matrix file: /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/../../datacenter/connection_matrices/fairness/fairness_perm_128n_10MB.cm
+routing strategy: ecmp_host
+end_time 100000 us
+random seed 42
+Logging to /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/results/fairness/cubic_leaf_spine_128_fairness_perm_128n_10MB.dat
+Loading connection matrix from /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/../../datacenter/connection_matrices/fairness/fairness_perm_128n_10MB.cm
+Nodes: 128 Connections: 128 Triggers: 0 Failures: 0
+Using 128 nodes
+Error: Unknown attribute  at line 12
+Allowed attributes are: tier, downlink_speed_gbps, radix_up, radix_down, queue_up, queue_down, oversubscribed, bundle, switch_latency_ns, downlink_latency_ns

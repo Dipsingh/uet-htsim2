@@ -43,6 +43,10 @@ set_property(TARGET htsim_eqds PROPERTY EXCLUDE_FROM_ALL TRUE)
 
 add_executable(htsim_uec main_uec.cpp)
 
+add_executable(htsim_tcpcubic main_tcpcubic.cpp)
+
+add_executable(htsim_mixed main_mixed.cpp)
+
 # -------------------------------
 # Linking Executables with Libraries
 # -------------------------------
@@ -54,6 +58,8 @@ set (ALL_EXECUTABLES
     htsim_hpcc
     htsim_eqds
     htsim_uec
+    htsim_tcpcubic
+    htsim_mixed
 )
 foreach(EXECUTABLE ${ALL_EXECUTABLES})
     # Link each executable with the 'htsim' library defined in the parent directory.

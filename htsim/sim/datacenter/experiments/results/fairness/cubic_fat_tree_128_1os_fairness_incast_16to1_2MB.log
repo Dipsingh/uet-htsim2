@@ -1,0 +1,373 @@
+topology file: /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/../../datacenter/topologies/fat_tree_128_1os.topo
+traffic matrix file: /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/../../datacenter/connection_matrices/fairness/fairness_incast_16to1_2MB.cm
+routing strategy: ecmp_host
+end_time 100000 us
+random seed 42
+Logging to /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/results/fairness/cubic_fat_tree_128_1os_fairness_incast_16to1_2MB.dat
+Loading connection matrix from /Users/dipsingh/PycharmProjects/uet-htsim2/htsim/sim/datacenter/experiments/../../datacenter/connection_matrices/fairness/fairness_incast_16to1_2MB.cm
+Nodes: 128 Connections: 128 Triggers: 0 Failures: 0
+Using 128 nodes
+Topology load done
+Fat Tree topology (0) with 1us Src-ToR links, 1us ToR-Agg links, 1us Agg-Core links, 0us ToR switch latency, 0us Agg switch latency, 0us Core switch latency.
+ for 6us diameter latency.
+no_of_tor_uplinks: 128
+no_of_agg_uplinks: 128
+No of nodes: 128
+No of pods: 8
+Hosts per pod: 16
+Hosts per pod: 16
+ToR switches per pod: 4
+Agg switches per pod: 4
+No of core switches: 16
+FatTreeCfg constructor done.
+Tier 0 QueueSize Down 150000 bytes
+Tier 0 QueueSize Up 150000 bytes
+Tier 1 QueueSize Down 150000 bytes
+Tier 1 QueueSize Up 150000 bytes
+Tier 2 QueueSize Down 150000 bytes
+FatTreeTopologyCfg NCORE=16 NAGG=32 NTOR=32 NSRV=128 NPOD=8 tor_switches_per_pod=4 agg_switches_per_pod=4 tiers=3 host_per_pod=16 enabled_ecn=0 enable_ecn_on_tor_downlink=0 ecn_low=0 ecn_high=0 num_failed_links=0 failed_link_ratio=0.25 no_of_nodes=128 hop_latency=0 switch_latency=0 diameter_latency=6000000 diameter=6 tier=0 link_latency=1000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=4 queue_down=150000 radix_up=4 queue_up=150000 tier=1 link_latency=1000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=4 queue_down=150000 radix_up=4 queue_up=150000 tier=2 link_latency=1000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=8 queue_down=150000
+actual nodes 128
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 16
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 16
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 16
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 16
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 16
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 16
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 16
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 4
+Setting flow size to 2001500
+pathcount 16
+Setting flow size to 2001500
+Starting simulation
+Flow tcpsrc finished at 1.07656
+Flow tcpsrc finished at 1.10308
+Flow tcpsrc finished at 1.10476
+Flow tcpsrc finished at 1.11676
+Flow tcpsrc finished at 1.17724
+Flow tcpsrc finished at 1.18492
+Flow tcpsrc finished at 1.19272
+Flow tcpsrc finished at 1.20856
+Flow tcpsrc finished at 1.20988
+Flow tcpsrc finished at 1.27408
+Flow tcpsrc finished at 1.3204
+Flow tcpsrc finished at 1.33228
+Flow tcpsrc finished at 1.33924
+Flow tcpsrc finished at 1.40128
+Flow tcpsrc finished at 1.40392
+Flow tcpsrc finished at 1.46104
+Flow tcpsrc finished at 1.5034
+Flow tcpsrc finished at 1.51876
+Flow tcpsrc finished at 1.52908
+Flow tcpsrc finished at 1.55128
+Flow tcpsrc finished at 1.56064
+Flow tcpsrc finished at 1.5862
+Flow tcpsrc finished at 1.59316
+Flow tcpsrc finished at 1.59724
+Flow tcpsrc finished at 1.60744
+Flow tcpsrc finished at 1.6102
+Flow tcpsrc finished at 1.61428
+Flow tcpsrc finished at 1.6258
+Flow tcpsrc finished at 1.672
+Flow tcpsrc finished at 1.68232
+Flow tcpsrc finished at 1.7044
+Flow tcpsrc finished at 1.7074
+Flow tcpsrc finished at 1.76788
+Flow tcpsrc finished at 1.7692
+Flow tcpsrc finished at 1.78684
+Flow tcpsrc finished at 1.78804
+Flow tcpsrc finished at 1.80148
+Flow tcpsrc finished at 1.8124
+Flow tcpsrc finished at 1.8142
+Flow tcpsrc finished at 1.83448
+Flow tcpsrc finished at 1.83484
+Flow tcpsrc finished at 1.84336
+Flow tcpsrc finished at 1.84912
+Flow tcpsrc finished at 1.85908
+Flow tcpsrc finished at 1.86064
+Flow tcpsrc finished at 1.86124
+Flow tcpsrc finished at 1.8724
+Flow tcpsrc finished at 1.87516
+Flow tcpsrc finished at 1.87696
+Flow tcpsrc finished at 1.8904
+Flow tcpsrc finished at 1.89664
+Flow tcpsrc finished at 1.91368
+Flow tcpsrc finished at 1.92412
+Flow tcpsrc finished at 1.93312
+Flow tcpsrc finished at 1.94048
+Flow tcpsrc finished at 1.97328
+Flow tcpsrc finished at 1.97908
+Flow tcpsrc finished at 1.98376
+Flow tcpsrc finished at 1.98964
+Flow tcpsrc finished at 1.99536
+Flow tcpsrc finished at 1.99576
+Flow tcpsrc finished at 2.00592
+Flow tcpsrc finished at 2.02384
+Flow tcpsrc finished at 2.02904
+Flow tcpsrc finished at 2.03628
+Flow tcpsrc finished at 2.06132
+Flow tcpsrc finished at 2.07072
+Flow tcpsrc finished at 2.08168
+Flow tcpsrc finished at 2.11324
+Flow tcpsrc finished at 2.11468
+Flow tcpsrc finished at 2.12012
+Flow tcpsrc finished at 2.12496
+Flow tcpsrc finished at 2.13324
+Flow tcpsrc finished at 2.16424
+Flow tcpsrc finished at 2.16544
+Flow tcpsrc finished at 2.1716
+Flow tcpsrc finished at 2.20424
+Flow tcpsrc finished at 2.2172
+Flow tcpsrc finished at 2.22588
+Flow tcpsrc finished at 2.22616
+Flow tcpsrc finished at 2.22668
+Flow tcpsrc finished at 2.23244
+Flow tcpsrc finished at 2.23664
+Flow tcpsrc finished at 2.2398
+Flow tcpsrc finished at 2.2558
+Flow tcpsrc finished at 2.25812
+Flow tcpsrc finished at 2.25896
+Flow tcpsrc finished at 2.26072
+Flow tcpsrc finished at 2.26484
+Flow tcpsrc finished at 2.27088
+Flow tcpsrc finished at 2.28656
+Flow tcpsrc finished at 2.29088
+Flow tcpsrc finished at 2.3048
+Flow tcpsrc finished at 2.32992
+Flow tcpsrc finished at 2.37724
+Flow tcpsrc finished at 2.3784
+Flow tcpsrc finished at 2.46872
+Flow tcpsrc finished at 2.4948
+Flow tcpsrc finished at 2.51064
+Flow tcpsrc finished at 2.52792
+Flow tcpsrc finished at 2.535
+Flow tcpsrc finished at 2.58404
+Flow tcpsrc finished at 2.62148
+Flow tcpsrc finished at 2.71264
+Flow tcpsrc finished at 2.85288
+Flow tcpsrc finished at 2.8534
+Flow tcpsrc finished at 3.11416
+Flow tcpsrc finished at 3.28744
+.Done
+Total packets sent: 150461
+Total retransmits: 253

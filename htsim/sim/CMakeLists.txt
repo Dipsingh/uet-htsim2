@@ -113,6 +113,8 @@ set(SOURCE_FILES
     tcp.cpp
     tcp_periodic.cpp
     tcp_transfer.cpp
+    tcpcubic.cpp
+    tcpcubic_transfer.cpp
     tcppacket.cpp
     trigger.cpp
     uec.cpp
