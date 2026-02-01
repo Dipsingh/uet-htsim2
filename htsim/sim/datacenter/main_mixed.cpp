@@ -15,6 +15,9 @@
 #include <string.h>
 #include <math.h>
 #include <list>
+#include <vector>
+#include <algorithm>
+#include <numeric>
 #include <memory>
 
 #include "network.h"
@@ -28,6 +31,7 @@
 #include "tcpcubic.h"
 #include "uec.h"
 #include "uec_mp.h"
+#include "nscc_trace_logger.h"
 #include "firstfit.h"
 #include "topology.h"
 #include "connection_matrix.h"
@@ -44,16 +48,41 @@ uint32_t DEFAULT_NODES = 128;
 FirstFit* ff = NULL;
 EventList eventlist;
 
+// Per-flow record for CSV output
+struct FlowRecord {
+    uint32_t flow_id;
+    string protocol;
+    int src;
+    int dst;
+    uint64_t flow_size_bytes;
+    simtime_picosec start_time;
+    // Populated after simulation:
+    bool finished;
+    uint64_t bytes_received;
+    uint64_t retransmits;
+};
+
 void exit_error(char* progr) {
     cout << "Usage " << progr
          << " [-o output_file]"
          << " [-nodes N]"
          << " [-conns N]"
          << " [-tm traffic_matrix_file]"
+         << " [-topo topology_file]"
          << " [-end end_time_in_us]"
          << " [-seed random_seed]"
          << " [-q queue_size_packets]"
+         << " [-linkspeed Mbps]"
          << " [-nscc_ratio 0.0-1.0]"
+         << " [-target_q_delay us]"
+         << " [-qa_gate N]"
+         << " [-path_entropy N]"
+         << " [-cwnd packets]"
+         << " [-hystart 0|1]"
+         << " [-fast_conv 0|1]"
+         << " [-csv csv_output_file]"
+         << " [-trace trace_output_file]"
+         << " [-ecn]"
          << endl;
     exit(1);
 }
@@ -75,9 +104,21 @@ int main(int argc, char **argv) {
     double nscc_ratio = 0.5;  // 50% NSCC, 50% TCP Cubic by default
     uint32_t ports = 1;
     uint16_t path_entropy_size = 16;
-    bool enable_ecn = false;  // ECN off by default, enable with -ecn flag
+    bool enable_ecn = false;
+
+    // NSCC parameters
+    uint32_t target_q_delay_us = 5;
+    uint32_t qa_gate = 2;
+
+    // TCP Cubic parameters
+    uint32_t cwnd_pkts = 10;
+    bool hystart_enabled = true;
+    bool fast_convergence = true;
 
     char* tm_file = NULL;
+    char* topo_file = NULL;
+    char* csv_file = NULL;
+    char* trace_file = NULL;
 
     while (i < argc) {
         if (!strcmp(argv[i], "-o")) {
@@ -100,6 +141,10 @@ int main(int argc, char **argv) {
             tm_file = argv[i+1];
             cout << "traffic matrix file: " << tm_file << endl;
             i++;
+        } else if (!strcmp(argv[i], "-topo")) {
+            topo_file = argv[i+1];
+            cout << "topology file: " << topo_file << endl;
+            i++;
         } else if (!strcmp(argv[i], "-seed")) {
             seed = atoi(argv[i+1]);
             cout << "random seed " << seed << endl;
@@ -108,9 +153,45 @@ int main(int argc, char **argv) {
             queuesize_pkt = atoi(argv[i+1]);
             cout << "queue size " << queuesize_pkt << " packets" << endl;
             i++;
+        } else if (!strcmp(argv[i], "-linkspeed")) {
+            linkspeed = speedFromMbps(atof(argv[i+1]));
+            cout << "linkspeed " << argv[i+1] << " Mbps" << endl;
+            i++;
         } else if (!strcmp(argv[i], "-nscc_ratio")) {
             nscc_ratio = atof(argv[i+1]);
             cout << "NSCC ratio " << nscc_ratio << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-target_q_delay")) {
+            target_q_delay_us = atoi(argv[i+1]);
+            cout << "NSCC target queue delay " << target_q_delay_us << " us" << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-qa_gate")) {
+            qa_gate = atoi(argv[i+1]);
+            cout << "NSCC qa_gate " << qa_gate << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-path_entropy")) {
+            path_entropy_size = atoi(argv[i+1]);
+            cout << "NSCC path entropy " << path_entropy_size << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-cwnd")) {
+            cwnd_pkts = atoi(argv[i+1]);
+            cout << "TCP Cubic initial cwnd " << cwnd_pkts << " packets" << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-hystart")) {
+            hystart_enabled = atoi(argv[i+1]) != 0;
+            cout << "TCP Cubic HyStart " << (hystart_enabled ? "enabled" : "disabled") << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-fast_conv")) {
+            fast_convergence = atoi(argv[i+1]) != 0;
+            cout << "TCP Cubic fast convergence " << (fast_convergence ? "enabled" : "disabled") << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-csv")) {
+            csv_file = argv[i+1];
+            cout << "CSV output: " << csv_file << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-trace")) {
+            trace_file = argv[i+1];
+            cout << "Trace output: " << trace_file << endl;
             i++;
         } else if (!strcmp(argv[i], "-ecn")) {
             enable_ecn = true;
@@ -159,19 +240,27 @@ int main(int argc, char **argv) {
     no_of_nodes = conns->N;
     cout << "Using " << no_of_nodes << " nodes" << endl;
 
-    // Create topology with switch-based routing for NSCC
-    // Using COMPOSITE queue type to support both protocols
+    // Create topology
     FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
 
     unique_ptr<FatTreeTopologyCfg> topo_cfg;
-    topo_cfg = make_unique<FatTreeTopologyCfg>(no_of_nodes, linkspeed, memFromPkt(queuesize_pkt), COMPOSITE);
+    if (topo_file) {
+        topo_cfg = FatTreeTopologyCfg::load(topo_file, memFromPkt(queuesize_pkt), COMPOSITE, FAIR_PRIO);
+        if (topo_cfg->no_of_nodes() != no_of_nodes) {
+            cerr << "Mismatch between connection matrix (" << no_of_nodes
+                 << " nodes) and topology (" << topo_cfg->no_of_nodes() << " nodes)" << endl;
+            exit(1);
+        }
+        topo_cfg->set_queue_sizes(memFromPkt(queuesize_pkt));
+    } else {
+        topo_cfg = make_unique<FatTreeTopologyCfg>(no_of_nodes, linkspeed, memFromPkt(queuesize_pkt), COMPOSITE);
+    }
 
     // Enable ECN if requested
-    // Using typical thresholds: low = 25% of queue, high = 97% of queue
     if (enable_ecn) {
         mem_b queue_bytes = memFromPkt(queuesize_pkt);
-        mem_b ecn_low = queue_bytes / 4;       // 25% threshold
-        mem_b ecn_high = queue_bytes * 97 / 100;  // 97% threshold
+        mem_b ecn_low = queue_bytes / 4;
+        mem_b ecn_high = queue_bytes * 97 / 100;
         topo_cfg->set_ecn_parameters(true, true, ecn_low, ecn_high);
         cout << "ECN thresholds: low=" << ecn_low << " bytes, high=" << ecn_high << " bytes" << endl;
     }
@@ -187,8 +276,21 @@ int main(int argc, char **argv) {
     cout << "Network RTT: " << timeAsUs(network_rtt) << " us" << endl;
 
     // Initialize NSCC parameters
-    simtime_picosec target_Qdelay = timeFromUs((uint32_t)5);
-    UecSrc::initNsccParams(network_rtt, linkspeed, target_Qdelay, 2, true);
+    simtime_picosec target_Qdelay = timeFromUs(target_q_delay_us);
+    UecSrc::initNsccParams(network_rtt, linkspeed, target_Qdelay, qa_gate, true);
+
+    // Set up trace logger if requested
+    unique_ptr<NsccTraceLogger> trace_logger;
+    if (trace_file) {
+        trace_logger = make_unique<NsccTraceLogger>(trace_file);
+        if (trace_logger->is_open()) {
+            UecSrc::setTraceLogger(trace_logger.get());
+            cout << "NSCC trace logging enabled: " << trace_file << endl;
+        } else {
+            cerr << "Failed to open trace file: " << trace_file << endl;
+            trace_logger.reset();
+        }
+    }
 
     // Create UecNIC objects for each node (needed for NSCC)
     vector<unique_ptr<UecNIC>> nics;
@@ -196,13 +298,23 @@ int main(int argc, char **argv) {
         nics.emplace_back(make_unique<UecNIC>(ix, eventlist, linkspeed, ports));
     }
 
+    // Pre-compute paths for TCP Cubic
+    vector<const Route*>*** net_paths;
+    net_paths = new vector<const Route*>**[no_of_nodes];
+    for (uint32_t n = 0; n < no_of_nodes; n++) {
+        net_paths[n] = new vector<const Route*>*[no_of_nodes];
+        for (uint32_t m = 0; m < no_of_nodes; m++)
+            net_paths[n][m] = NULL;
+    }
+
     // Setup connections - split between NSCC and TCP Cubic
     vector<connection*>* all_conns = conns->getAllConnections();
 
-    list<TcpCubicSrc*> cubic_srcs;
-    list<TcpSink*> cubic_sinks;
-    list<UecSrc*> nscc_srcs;
-    list<UecSink*> nscc_sinks;
+    vector<TcpCubicSrc*> cubic_srcs;
+    vector<TcpSink*> cubic_sinks;
+    vector<UecSrc*> nscc_srcs;
+    vector<UecSink*> nscc_sinks;
+    vector<FlowRecord> flow_records;
 
     uint32_t nscc_count = 0, cubic_count = 0;
     uint32_t total_conns = all_conns->size();
@@ -220,7 +332,19 @@ int main(int argc, char **argv) {
         // Decide protocol based on ratio
         bool use_nscc = (c < nscc_target);
 
+        FlowRecord rec;
+        rec.flow_id = c;
+        rec.src = src;
+        rec.dst = dest;
+        rec.flow_size_bytes = crt->size;
+        rec.start_time = starttime;
+        rec.finished = false;
+        rec.bytes_received = 0;
+        rec.retransmits = 0;
+
         if (use_nscc) {
+            rec.protocol = "NSCC";
+
             // Create NSCC source and sink with switch-based routing
             unique_ptr<UecMultipath> mp = make_unique<UecMpOblivious>(path_entropy_size, false);
 
@@ -245,13 +369,11 @@ int main(int argc, char **argv) {
             uecSrc->initNscc(0, network_rtt);
 
             // Set up switch-based routing
-            // Route from source to ToR switch
             Route* srctotor = new Route();
             srctotor->push_back(top->queues_ns_nlp[src][topo_cfg->HOST_POD_SWITCH(src)][0]);
             srctotor->push_back(top->pipes_ns_nlp[src][topo_cfg->HOST_POD_SWITCH(src)][0]);
             srctotor->push_back(top->queues_ns_nlp[src][topo_cfg->HOST_POD_SWITCH(src)][0]->getRemoteEndpoint());
 
-            // Route from destination to ToR switch (for ACKs)
             Route* dsttotor = new Route();
             dsttotor->push_back(top->queues_ns_nlp[dest][topo_cfg->HOST_POD_SWITCH(dest)][0]);
             dsttotor->push_back(top->pipes_ns_nlp[dest][topo_cfg->HOST_POD_SWITCH(dest)][0]);
@@ -268,16 +390,18 @@ int main(int argc, char **argv) {
             nscc_count++;
 
         } else {
-            // Create TCP Cubic source and sink with route-based routing
-            // Get paths through the SAME topology (same queues as NSCC)
-            vector<const Route*>* paths = top->get_paths(src, dest);
+            rec.protocol = "CUBIC";
+
+            // Get paths through the SAME topology
+            if (!net_paths[src][dest])
+                net_paths[src][dest] = top->get_paths(src, dest);
 
             size_t choice = 0;
-            if (paths->size() > 1) {
-                choice = rand() % paths->size();
+            if (net_paths[src][dest]->size() > 1) {
+                choice = rand() % net_paths[src][dest]->size();
             }
 
-            Route* routeout = new Route(*(paths->at(choice)));
+            Route* routeout = new Route(*(net_paths[src][dest]->at(choice)));
             Route* routein = new Route();
 
             TcpCubicSrc* tcpSrc = new TcpCubicSrc(NULL, NULL, eventlist);
@@ -292,8 +416,11 @@ int main(int argc, char **argv) {
                 tcpSrc->set_flowsize(crt->size);
             }
 
-            tcpSrc->set_cwnd(10 * Packet::data_packet_size());
+            tcpSrc->set_cwnd(cwnd_pkts * Packet::data_packet_size());
             tcpSrc->set_ssthresh(0xffffffff);
+            tcpSrc->setHystartEnabled(hystart_enabled);
+            tcpSrc->setFastConvergenceEnabled(fast_convergence);
+            tcpSrc->setTcpFriendlinessEnabled(true);
 
             tcpRtxScanner.registerTcp(*tcpSrc);
 
@@ -308,6 +435,8 @@ int main(int argc, char **argv) {
             cubic_sinks.push_back(tcpSnk);
             cubic_count++;
         }
+
+        flow_records.push_back(rec);
     }
 
     cout << "Created " << nscc_count << " NSCC flows and " << cubic_count << " TCP Cubic flows" << endl;
@@ -325,44 +454,134 @@ int main(int argc, char **argv) {
     while (eventlist.doNextEvent()) {
     }
 
-    cout << "Done" << endl;
+    simtime_picosec sim_end = eventlist.now();
+    cout << "Done at " << timeAsUs(sim_end) << " us" << endl;
 
-    // Collect statistics
+    // ========================================
+    // Populate flow records with results
+    // ========================================
+    uint32_t nscc_idx = 0, cubic_idx = 0;
+    for (auto& rec : flow_records) {
+        if (rec.protocol == "NSCC") {
+            UecSrc* src_ptr = nscc_srcs[nscc_idx];
+            UecSink* snk_ptr = nscc_sinks[nscc_idx];
+            rec.finished = src_ptr->isTotallyFinished();
+            rec.bytes_received = snk_ptr->total_received();
+            rec.retransmits = 0; // NSCC doesn't expose retransmit count the same way
+            nscc_idx++;
+        } else {
+            TcpCubicSrc* src_ptr = cubic_srcs[cubic_idx];
+            TcpSink* snk_ptr = cubic_sinks[cubic_idx];
+            rec.bytes_received = snk_ptr->cumulative_ack();
+            rec.finished = (src_ptr->_last_acked >= src_ptr->_flow_size && src_ptr->_flow_size > 0);
+            rec.retransmits = src_ptr->_drops;
+            cubic_idx++;
+        }
+    }
+
+    // ========================================
+    // Write CSV output
+    // ========================================
+    if (csv_file) {
+        ofstream csv(csv_file);
+        if (csv.is_open()) {
+            csv << "flow_id,protocol,src,dst,size_bytes,start_us,fct_us,throughput_gbps,finished,bytes_received,retransmits" << endl;
+            for (auto& rec : flow_records) {
+                double start_us = timeAsUs(rec.start_time);
+                double fct_us = -1;
+                double throughput_gbps = 0;
+
+                if (rec.finished && rec.flow_size_bytes > 0) {
+                    // For finished flows, use bytes_received to estimate completion
+                    // FCT = time from start until all bytes received
+                    // We approximate: the flow finished somewhere before sim_end
+                    // Since we don't have exact finish timestamps in all cases,
+                    // use sim_end as upper bound for unfinished, actual for finished
+                    double elapsed_us = timeAsUs(sim_end) - start_us;
+                    if (elapsed_us > 0) {
+                        fct_us = elapsed_us;
+                        throughput_gbps = (rec.bytes_received * 8.0) / (elapsed_us * 1000.0);
+                    }
+                } else if (rec.bytes_received > 0) {
+                    double elapsed_us = timeAsUs(sim_end) - start_us;
+                    if (elapsed_us > 0) {
+                        fct_us = elapsed_us; // still running at sim end
+                        throughput_gbps = (rec.bytes_received * 8.0) / (elapsed_us * 1000.0);
+                    }
+                }
+
+                csv << rec.flow_id << ","
+                    << rec.protocol << ","
+                    << rec.src << ","
+                    << rec.dst << ","
+                    << rec.flow_size_bytes << ","
+                    << start_us << ","
+                    << fct_us << ","
+                    << throughput_gbps << ","
+                    << (rec.finished ? 1 : 0) << ","
+                    << rec.bytes_received << ","
+                    << rec.retransmits
+                    << endl;
+            }
+            csv.close();
+            cout << "CSV results written to " << csv_file << endl;
+        } else {
+            cerr << "Failed to open CSV file: " << csv_file << endl;
+        }
+    }
+
+    // ========================================
+    // Console statistics
+    // ========================================
     cout << "\n========================================" << endl;
     cout << "INTER-PROTOCOL FAIRNESS RESULTS" << endl;
     cout << "========================================" << endl;
 
-    // NSCC statistics - use sink's bytes_received for accurate byte count
+    // NSCC statistics
     cout << "\n=== NSCC Statistics ===" << endl;
     uint64_t nscc_total_bytes = 0;
     uint32_t nscc_finished = 0;
-    for (auto src : nscc_srcs) {
-        if (src->isTotallyFinished()) {
-            nscc_finished++;
+    vector<double> nscc_throughputs;
+    for (auto& rec : flow_records) {
+        if (rec.protocol != "NSCC") continue;
+        nscc_total_bytes += rec.bytes_received;
+        if (rec.finished) nscc_finished++;
+        if (rec.bytes_received > 0) {
+            double elapsed_us = timeAsUs(sim_end) - timeAsUs(rec.start_time);
+            if (elapsed_us > 0) {
+                nscc_throughputs.push_back((rec.bytes_received * 8.0) / (elapsed_us * 1000.0));
+            }
         }
-    }
-    // Use sink's total_received() for accurate byte count
-    for (auto snk : nscc_sinks) {
-        nscc_total_bytes += snk->total_received();
     }
     cout << "NSCC flows completed: " << nscc_finished << "/" << nscc_count << endl;
     cout << "NSCC total bytes received: " << nscc_total_bytes << endl;
-    double nscc_throughput_gbps = (nscc_total_bytes * 8.0) / (end_time * 1000.0);  // end_time is in us
+    double nscc_throughput_gbps = (nscc_total_bytes * 8.0) / (end_time * 1000.0);
     cout << "NSCC aggregate throughput: " << nscc_throughput_gbps << " Gbps" << endl;
+    if (!nscc_throughputs.empty()) {
+        sort(nscc_throughputs.begin(), nscc_throughputs.end());
+        double sum = accumulate(nscc_throughputs.begin(), nscc_throughputs.end(), 0.0);
+        cout << "NSCC per-flow throughput (Gbps): mean=" << sum / nscc_throughputs.size()
+             << " median=" << nscc_throughputs[nscc_throughputs.size()/2]
+             << " p99=" << nscc_throughputs[(size_t)(nscc_throughputs.size() * 0.99)]
+             << endl;
+    }
 
     // TCP Cubic statistics
     cout << "\n=== TCP Cubic Statistics ===" << endl;
     uint64_t cubic_total_bytes = 0;
     uint64_t cubic_retx = 0;
     uint32_t cubic_finished = 0;
-    for (auto snk : cubic_sinks) {
-        cubic_total_bytes += snk->cumulative_ack();
-    }
-    for (auto src : cubic_srcs) {
-        cubic_retx += src->_drops;
-        // Check if flow finished by comparing bytes sent to flow size
-        if (src->_last_acked >= src->_flow_size && src->_flow_size > 0) {
-            cubic_finished++;
+    vector<double> cubic_throughputs;
+    for (auto& rec : flow_records) {
+        if (rec.protocol != "CUBIC") continue;
+        cubic_total_bytes += rec.bytes_received;
+        cubic_retx += rec.retransmits;
+        if (rec.finished) cubic_finished++;
+        if (rec.bytes_received > 0) {
+            double elapsed_us = timeAsUs(sim_end) - timeAsUs(rec.start_time);
+            if (elapsed_us > 0) {
+                cubic_throughputs.push_back((rec.bytes_received * 8.0) / (elapsed_us * 1000.0));
+            }
         }
     }
     cout << "TCP Cubic flows completed: " << cubic_finished << "/" << cubic_count << endl;
@@ -370,8 +589,16 @@ int main(int argc, char **argv) {
     cout << "TCP Cubic retransmits: " << cubic_retx << endl;
     double cubic_throughput_gbps = (cubic_total_bytes * 8.0) / (end_time * 1000.0);
     cout << "TCP Cubic aggregate throughput: " << cubic_throughput_gbps << " Gbps" << endl;
+    if (!cubic_throughputs.empty()) {
+        sort(cubic_throughputs.begin(), cubic_throughputs.end());
+        double sum = accumulate(cubic_throughputs.begin(), cubic_throughputs.end(), 0.0);
+        cout << "TCP Cubic per-flow throughput (Gbps): mean=" << sum / cubic_throughputs.size()
+             << " median=" << cubic_throughputs[cubic_throughputs.size()/2]
+             << " p99=" << cubic_throughputs[(size_t)(cubic_throughputs.size() * 0.99)]
+             << endl;
+    }
 
-    // Fairness comparison
+    // Bandwidth share and fairness
     cout << "\n=== Bandwidth Share Analysis ===" << endl;
     double total_bytes = nscc_total_bytes + cubic_total_bytes;
     if (total_bytes > 0) {
@@ -381,28 +608,62 @@ int main(int argc, char **argv) {
         cout << "NSCC bandwidth share: " << nscc_share << "%" << endl;
         cout << "TCP Cubic bandwidth share: " << cubic_share << "%" << endl;
 
-        // Expected fair share based on flow count
-        double expected_nscc_share = (nscc_count * 100.0) / (nscc_count + cubic_count);
-        double expected_cubic_share = (cubic_count * 100.0) / (nscc_count + cubic_count);
-        cout << "\nExpected fair share (by flow count):" << endl;
-        cout << "  NSCC: " << expected_nscc_share << "%" << endl;
-        cout << "  TCP Cubic: " << expected_cubic_share << "%" << endl;
+        if (nscc_count > 0 && cubic_count > 0) {
+            double expected_nscc_share = (nscc_count * 100.0) / (nscc_count + cubic_count);
+            double expected_cubic_share = (cubic_count * 100.0) / (nscc_count + cubic_count);
+            cout << "\nExpected fair share (by flow count):" << endl;
+            cout << "  NSCC: " << expected_nscc_share << "%" << endl;
+            cout << "  TCP Cubic: " << expected_cubic_share << "%" << endl;
 
-        // Fairness ratio
-        double nscc_fairness_ratio = nscc_share / expected_nscc_share;
-        double cubic_fairness_ratio = cubic_share / expected_cubic_share;
-        cout << "\nFairness ratio (actual/expected):" << endl;
-        cout << "  NSCC: " << nscc_fairness_ratio << "x" << endl;
-        cout << "  TCP Cubic: " << cubic_fairness_ratio << "x" << endl;
-
-        if (nscc_fairness_ratio > 1.1) {
-            cout << "\n** NSCC is getting MORE than its fair share **" << endl;
-        } else if (cubic_fairness_ratio > 1.1) {
-            cout << "\n** TCP Cubic is getting MORE than its fair share **" << endl;
-        } else {
-            cout << "\n** Both protocols are getting approximately fair share **" << endl;
+            double nscc_fairness_ratio = nscc_share / expected_nscc_share;
+            double cubic_fairness_ratio = cubic_share / expected_cubic_share;
+            cout << "\nFairness ratio (actual/expected):" << endl;
+            cout << "  NSCC: " << nscc_fairness_ratio << "x" << endl;
+            cout << "  TCP Cubic: " << cubic_fairness_ratio << "x" << endl;
         }
     }
+
+    // Jain's fairness index across all flows (normalized throughput)
+    cout << "\n=== Jain's Fairness Index ===" << endl;
+    vector<double> all_throughputs;
+    all_throughputs.insert(all_throughputs.end(), nscc_throughputs.begin(), nscc_throughputs.end());
+    all_throughputs.insert(all_throughputs.end(), cubic_throughputs.begin(), cubic_throughputs.end());
+    if (all_throughputs.size() > 1) {
+        double sum_x = 0, sum_x2 = 0;
+        for (double t : all_throughputs) {
+            sum_x += t;
+            sum_x2 += t * t;
+        }
+        double n = all_throughputs.size();
+        double jains_fi = (sum_x * sum_x) / (n * sum_x2);
+        cout << "Jain's Fairness Index (all flows): " << jains_fi << endl;
+
+        // Per-protocol Jain's FI
+        if (nscc_throughputs.size() > 1) {
+            sum_x = 0; sum_x2 = 0;
+            for (double t : nscc_throughputs) { sum_x += t; sum_x2 += t * t; }
+            n = nscc_throughputs.size();
+            cout << "Jain's FI (NSCC only): " << (sum_x * sum_x) / (n * sum_x2) << endl;
+        }
+        if (cubic_throughputs.size() > 1) {
+            sum_x = 0; sum_x2 = 0;
+            for (double t : cubic_throughputs) { sum_x += t; sum_x2 += t * t; }
+            n = cubic_throughputs.size();
+            cout << "Jain's FI (TCP Cubic only): " << (sum_x * sum_x) / (n * sum_x2) << endl;
+        }
+    }
+
+    // Clean up trace logger
+    if (trace_logger) {
+        UecSrc::setTraceLogger(nullptr);
+        trace_logger.reset();
+    }
+
+    // Clean up path cache
+    for (uint32_t n = 0; n < no_of_nodes; n++) {
+        delete[] net_paths[n];
+    }
+    delete[] net_paths;
 
     return 0;
 }

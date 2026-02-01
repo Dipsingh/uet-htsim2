@@ -117,6 +117,7 @@ set(SOURCE_FILES
     tcpcubic_transfer.cpp
     tcppacket.cpp
     trigger.cpp
+    nscc_trace_logger.cpp
     uec.cpp
     uec_logger.cpp
     uecpacket.cpp

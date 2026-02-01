@@ -5,6 +5,9 @@
 #include <memory>
 #include <sstream>
 #include <string.h>
+#include <fstream>
+#include <algorithm>
+#include <numeric>
 
 #include <math.h>
 #include <unistd.h>
@@ -18,6 +21,7 @@
 #include "uec.h"
 #include "uec_mp.h"
 #include "uec_pdcses.h"
+#include "nscc_trace_logger.h"
 #include "compositequeue.h"
 #include "topology.h"
 #include "connection_matrix.h"
@@ -129,6 +133,8 @@ int main(int argc, char **argv) {
 
     char* tm_file = NULL;
     char* topo_file = NULL;
+    char* csv_file = NULL;
+    char* trace_file = NULL;
     int8_t qa_gate = -1;
     bool conn_reuse = false;
 
@@ -506,6 +512,14 @@ int main(int argc, char **argv) {
                 FatTreeSwitch::set_strategy(FatTreeSwitch::RR);
             }
             i++;
+        } else if (!strcmp(argv[i],"-csv")) {
+            csv_file = argv[i+1];
+            cout << "CSV output: " << csv_file << endl;
+            i++;
+        } else if (!strcmp(argv[i],"-trace")) {
+            trace_file = argv[i+1];
+            cout << "Trace output: " << trace_file << endl;
+            i++;
         } else {
             cout << "Unknown parameter " << argv[i] << endl;
             exit_error(argv[0]);
@@ -746,6 +760,19 @@ int main(int argc, char **argv) {
         UecSrc::initNsccParams(network_max_unloaded_rtt, linkspeed, target_Qdelay, qa_gate, trimming_enabled);
     }
 
+    // Set up trace logger if requested
+    unique_ptr<NsccTraceLogger> trace_logger;
+    if (trace_file) {
+        trace_logger = make_unique<NsccTraceLogger>(trace_file);
+        if (trace_logger->is_open()) {
+            UecSrc::setTraceLogger(trace_logger.get());
+            cout << "NSCC trace logging enabled: " << trace_file << endl;
+        } else {
+            cerr << "Failed to open trace file: " << trace_file << endl;
+            trace_logger.reset();
+        }
+    }
+
     vector<unique_ptr<UecPullPacer>> pacers;
     vector<PCIeModel*> pcie_models;
     vector<OversubscribedCC*> oversubscribed_ccs;
@@ -773,6 +800,7 @@ int main(int argc, char **argv) {
 
     vector<connection*>* all_conns = conns->getAllConnections();
     vector <UecSrc*> uec_srcs;
+    vector <UecSink*> uec_sinks;
 
     map<flowid_t, pair<UecSrc*, UecSink*>> flowmap;
     map<flowid_t, UecPdcSes*> flow_pdc_map;
@@ -864,6 +892,7 @@ int main(int argc, char **argv) {
                 }
             }
             uec_srcs.push_back(uec_src);
+            uec_sinks.push_back(uec_snk);
             uec_src->setDst(dest);
 
             if (log_flow_events) {
@@ -1068,7 +1097,60 @@ int main(int argc, char **argv) {
     }
     for (int i = 0; i < 10; i++)
         cout << "Hop " << i << " Count " << counts[i] << endl;
-    */  
+    */
+
+    // ========================================
+    // Write per-flow CSV output
+    // ========================================
+    simtime_picosec sim_end = eventlist.now();
+
+    if (csv_file) {
+        ofstream csv(csv_file);
+        if (csv.is_open()) {
+            csv << "flow_id,src,dst,size_bytes,start_us,fct_us,throughput_gbps,finished,bytes_received,nacks" << endl;
+            for (size_t ix = 0; ix < uec_srcs.size(); ix++) {
+                UecSrc* s = uec_srcs[ix];
+                UecSink* snk = uec_sinks[ix];
+                connection* crt = all_conns->at(ix);
+
+                bool finished = s->isTotallyFinished();
+                uint64_t bytes_received = snk->total_received();
+                double start_us = (double)crt->start;
+                double fct_us = -1;
+                double throughput_gbps = 0;
+
+                if (bytes_received > 0) {
+                    double elapsed_us = timeAsUs(sim_end) - start_us;
+                    if (elapsed_us > 0) {
+                        fct_us = elapsed_us;
+                        throughput_gbps = (bytes_received * 8.0) / (elapsed_us * 1000.0);
+                    }
+                }
+
+                csv << s->flowId() << ","
+                    << crt->src << ","
+                    << crt->dst << ","
+                    << crt->size << ","
+                    << start_us << ","
+                    << fct_us << ","
+                    << throughput_gbps << ","
+                    << (finished ? 1 : 0) << ","
+                    << bytes_received << ","
+                    << s->stats().nacks_received
+                    << endl;
+            }
+            csv.close();
+            cout << "CSV results written to " << csv_file << endl;
+        } else {
+            cerr << "Failed to open CSV file: " << csv_file << endl;
+        }
+    }
+
+    // Clean up trace logger
+    if (trace_logger) {
+        UecSrc::setTraceLogger(nullptr);
+        trace_logger.reset();
+    }
 
     return EXIT_SUCCESS;
 }

@@ -16,6 +16,7 @@
 #include "pciemodel.h"
 #include "oversubscribed_cc.h"
 #include "uec_mp.h"
+#include "nscc_trace_logger.h"
 
 #define timeInf 0
 // min RTO bound in us
@@ -235,6 +236,11 @@ public:
     static bool _shown;
     bool _debug_src;
     bool debug() const { return _debug_src; }
+
+    // Trace logger for time-series CSV output (Phase 2)
+    static NsccTraceLogger* _trace_logger;
+    static void setTraceLogger(NsccTraceLogger* logger) { _trace_logger = logger; }
+    uint8_t _last_quadrant = 0;
 
    private:
     unique_ptr<UecMultipath> _mp;

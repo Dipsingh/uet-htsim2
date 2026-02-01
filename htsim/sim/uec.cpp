@@ -14,6 +14,7 @@ flowid_t UecSrc::_debug_flowid = UINT32_MAX;
 // to all paths.
 int UecSrc::_global_node_count = 0;
 bool UecSrc::_shown = false;
+NsccTraceLogger* UecSrc::_trace_logger = nullptr;
 mem_b UecSrc::_configured_maxwnd = 0;
 
 /* _min_rto can be tuned using setMinRTO. Don't change it here.  */
@@ -1175,6 +1176,12 @@ bool UecSrc::quick_adapt(bool is_loss, bool skip, simtime_picosec delay) {
             _cwnd = max(_achieved_bytes, _min_cwnd); //* _qa_scaling;
             _nscc_overall_stats.dec_quick_bytes += before - _cwnd;
             _nscc_fulfill_stats.dec_quick_bytes += before - _cwnd;
+            _last_quadrant = 5;  // QA event
+
+            if (_trace_logger) {
+                _trace_logger->logQAEvent(eventlist().now(), _flow.flow_id(),
+                                          before, _cwnd, _achieved_bytes, _in_flight);
+            }
 
             if (_flow.flow_id() == _debug_flowid) {
                 cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id()
@@ -1288,6 +1295,21 @@ void UecSrc::fulfill_adjustment(){
              << endl;
     }
 
+    // Trace logging at fulfill boundary (before stats reset)
+    if (_trace_logger) {
+        _trace_logger->logSample(
+            eventlist().now(), _flow.flow_id(),
+            _cwnd, _in_flight, _bdp, _maxwnd,
+            _avg_delay, _raw_rtt, _target_Qdelay, _base_rtt,
+            false, _last_quadrant,
+            _nscc_fulfill_stats.inc_fair_bytes,
+            _nscc_fulfill_stats.inc_prop_bytes,
+            _nscc_fulfill_stats.inc_fast_bytes,
+            _nscc_fulfill_stats.inc_eta_bytes,
+            _nscc_fulfill_stats.dec_multi_bytes,
+            _nscc_fulfill_stats.dec_quick_bytes);
+    }
+
     _inc_bytes = 0;
     _received_bytes = 0;
 
@@ -1314,24 +1336,27 @@ void UecSrc::updateCwndOnAck_NSCC(bool skip, simtime_picosec delay, mem_b newly_
         return;
 
     if (!skip && delay >= _target_Qdelay) {
+        _last_quadrant = 0;  // Q0: no-trim, delay >= target → fair increase
         fair_increase(newly_acked_bytes);
         if (_flow.flow_id() == _debug_flowid || UecSrc::_debug) {
-            cout << timeAsUs(eventlist().now()) <<" flowid " << _flow.flow_id()<< " " << _flow.str() << " fair_increase _nscc_cwnd " << _cwnd 
-                << " newly_acked_bytes " << newly_acked_bytes 
+            cout << timeAsUs(eventlist().now()) <<" flowid " << _flow.flow_id()<< " " << _flow.str() << " fair_increase _nscc_cwnd " << _cwnd
+                << " newly_acked_bytes " << newly_acked_bytes
                 << " fi " << _fi << endl;
         }
     } else if (!skip && delay < _target_Qdelay) {
+        _last_quadrant = 1;  // Q1: no-trim, delay < target → proportional increase
         proportional_increase(newly_acked_bytes,delay);
         if (_flow.flow_id() == _debug_flowid || UecSrc::_debug) {
             cout << timeAsUs(eventlist().now()) <<" flowid " << _flow.flow_id()<< " " << _flow.str() << " proportional_increase _nscc_cwnd " << _cwnd << endl;
         }
-    } else if (skip && delay >= _target_Qdelay) {    
+    } else if (skip && delay >= _target_Qdelay) {
+        _last_quadrant = 2;  // Q2: trim, delay >= target → multiplicative decrease
         multiplicative_decrease();
         if (_flow.flow_id() == _debug_flowid || UecSrc::_debug) {
             cout << timeAsUs(eventlist().now()) <<" flowid " << _flow.flow_id()<< " " << _flow.str() << " multiplicative_decrease _nscc_cwnd " << _cwnd << endl;
         }
     } else if (skip && delay < _target_Qdelay) {
-        // NOOP, just switch path
+        _last_quadrant = 3;  // Q3: trim, delay < target → noop / switch path
     }
 
     // Check here, fulfill_adjustment requires valid cwnd.
