@@ -170,6 +170,34 @@ Here's the resulting decision space:
 
 We didn't *invent* four quadrants — we *discovered* them by asking what the right response is for each combination of two orthogonal signals.
 
+### Where ECN Marks Come From: Switch Thresholds
+
+Before we look at the implementation, it's worth understanding *how* the ECN signal is actually generated — because it's not magic. Switches in the fabric mark packets with ECN when their output queue depth crosses a configured threshold. In this simulator, those thresholds are **derived from BDP** (`main_uec.cpp:712-725`):
+
+```
+  ecn_low  = ⌈0.2 × BDP_pkts⌉     (start marking — "queue is filling")
+  ecn_high = ⌈0.8 × BDP_pkts⌉     (mark everything — "queue is almost full")
+```
+
+Between `ecn_low` and `ecn_high`, the switch probabilistically marks packets (the probability ramps from 0% to 100%). Above `ecn_high`, every packet is marked.
+
+```
+  mark
+  probability
+  100% │                    ┌──────────
+      │                   ╱
+      │                  ╱     ← linear ramp between thresholds
+      │                 ╱
+    0% │───────────────┘
+      └───────────────┬──────┬──────→ queue depth (packets)
+                   ecn_low  ecn_high
+                   (0.2×BDP) (0.8×BDP)
+```
+
+**Why BDP-derived?** The thresholds scale automatically with network speed. At 100 Gbps with 150 KB BDP (~37 packets), `ecn_low ≈ 8 packets` and `ecn_high ≈ 30 packets`. At 400 Gbps with 600 KB BDP (~150 packets), the thresholds are 4× larger. This ensures the marks fire at the same *relative* queue occupancy regardless of link speed — the "smoke detector" is calibrated to the building size.
+
+**Interaction with NSCC:** These thresholds determine *when* the sender sees the ECN signal that drives quadrant selection. If `ecn_low` is set too high, queues can build significantly before any marks appear — the sender stays in Q1 (proportional increase) longer than intended, and by the time marks arrive, delay is already elevated (jumping straight to Q2 rather than getting the Q3/NOOP opportunity). If `ecn_low` is too low, the smoke detector is over-sensitive — marks appear from minor transient bumps, causing excessive NOOP quadrant entries even when the fabric is healthy.
+
 ### The Actual Implementation
 
 | | **No ECN** (`skip=false`) | **ECN** (`skip=true`) |
@@ -924,6 +952,38 @@ Why treat these cases differently? It comes down to how much we *trust* each sam
 
 **Why Case 2 overrides Case 1:** If the delay is extreme (more than 5× the base RTT), something is seriously wrong regardless of ECN status — possibly a failing link or major routing change. The filter uses the actual delay to respond quickly to genuine emergencies.
 
+### The Retransmission Ambiguity Problem
+
+There's a subtle trap hiding in the RTT measurement path that can silently corrupt delay samples. Consider what happens when a packet is retransmitted:
+
+```
+  t=0µs    Send packet #42 (first attempt)
+  t=5µs    Switch trims packet #42 → NACK arrives → queue for retransmit
+  t=8µs    Retransmit packet #42 (second attempt)
+  t=20µs   ACK for #42 arrives
+
+  Question: what is the true RTT?
+  ─────────────────────────────────
+  If the ACK is for the FIRST send:   RTT = 20 - 0  = 20µs  (inflated by the gap!)
+  If the ACK is for the SECOND send:  RTT = 20 - 8  = 12µs  (genuine RTT)
+
+  The ACK doesn't say which one it's acknowledging.
+```
+
+This is the classic **retransmission ambiguity** problem. If we naively use the first send time, we'll compute an inflated RTT that makes the algorithm think the network is more congested than it really is. If we use the second send time but the ACK was actually for the first attempt, we'll undercount delay.
+
+NSCC resolves this with `validateSendTs()` (`uec.cpp:892-903`), which uses the `_rtx_times` map to track how many times each sequence number has been sent:
+
+```
+  Rule 1: rtx_times = 0 AND rtx_echo = false  →  VALID  (fresh packet, clean ACK)
+  Rule 2: rtx_times = 1 AND rtx_echo = true   →  VALID  (first retransmit, ACK confirms)
+  Rule 3: anything else                         →  INVALID (ambiguous — fall back to avg_delay)
+```
+
+The receiver sets the `rtx_echo` flag on the ACK when the received packet was a retransmission (it can tell because the packet type is `DATA_RTX`). This two-sided handshake — sender tracks send count, receiver echoes retransmit status — disambiguates the common cases. Only multiply-retransmitted packets (which are rare in practice) fall through to the averaged delay fallback.
+
+**Why this matters for NSCC specifically:** In a spraying network with packet trimming, retransmissions happen regularly — a trim triggers a NACK, which triggers a retransmit on a (hopefully better) path. Each retransmit creates a potential ambiguity. Without `validateSendTs`, every retransmitted packet would contribute a potentially inflated RTT sample to the EWMA filter, biasing the delay signal upward and making the algorithm overly conservative. By filtering out ambiguous samples, NSCC keeps its delay signal clean even under high retransmission rates.
+
 ---
 
 ## 5. Quick Adapt: The Emergency Brake
@@ -1059,7 +1119,43 @@ On every ACK/NACK, the multipath engine receives feedback (`uec.cpp:1038`):
 _mp->processEv(pkt.ev(), pkt.ecn_echo() ? PATH_ECN : PATH_GOOD);
 ```
 
-NACK processing similarly reports `PATH_NACK` or `PATH_TIMEOUT`. This closes the loop: CC adjusts the window, multipath adjusts the *paths*.
+But NACK processing is more nuanced — it distinguishes **where** the trim happened:
+
+```
+  Receiver computes: is_last_hop = (pkt.nexthop() - pkt.trim_hop() - 2) == 0
+                                                                    ↑
+                                              htsim uses 2 elements per hop
+                                              (queue + pipe), hence the "-2"
+```
+
+This gives the sender a crucial piece of information: *was the packet trimmed in the fabric, or at the receiver's last-hop link?*
+
+```
+  Last-hop trim (is_last_hop = true):
+  ────────────────────────────────────────────────────────
+  Sender ──→ Switch A ──→ Switch B ──→ [Receiver NIC ✗]
+                                        ↑ trim happened HERE
+  The fabric path was fine! Only the receiver port is congested
+  (e.g., incast at the receiver).
+
+  → Multipath feedback: PATH_GOOD or PATH_ECN  (path is innocent)
+  → CC: skip cwnd reduction if receiver-based CC is active
+
+  Mid-fabric trim (is_last_hop = false):
+  ────────────────────────────────────────────────────────
+  Sender ──→ [Switch A ✗] ──→ Switch B ──→ Receiver
+              ↑ trim happened HERE
+  The fabric path itself is congested.
+
+  → Multipath feedback: PATH_NACK  (penalize this path)
+  → CC: reduce cwnd by nacked_bytes
+```
+
+Source: `uec.cpp:1629-1632` and `uec.cpp:2774-2775`
+
+**Why this matters:** Without last-hop detection, *every* trim would penalize the fabric path — even when the real bottleneck is a receiver-side incast that no amount of path steering can fix. By distinguishing last-hop trims, NSCC avoids poisoning the multipath engine's penalty scores with false positives. The Bitmap strategy would waste penalty budget on innocent paths; REPS would drain its recycle buffer of perfectly good entropies. Last-hop detection keeps the path quality signal clean.
+
+This closes the loop: CC adjusts the window, multipath adjusts the *paths*, and last-hop detection ensures the multipath engine only penalizes paths that actually caused the problem.
 
 ### Closing the Loop: NOOP + Multipath in Action
 
@@ -1300,6 +1396,217 @@ SLEEK also uses explicit probes (`uec.cpp:1066-1092`). When a flow has outstandi
 
 The intuition behind probes: a probe is a question — "did you receive everything I sent?" If the probe ACK comes back quickly (low delay), it means the network path is clear. So the missing packets aren't stuck in a queue somewhere waiting to be delivered — they're genuinely lost. A probe that returns with *high* delay is ambiguous (the missing packets might still be in transit on a slow path), but a probe that returns with *low* delay is a strong signal that the network has drained and anything still missing is gone for good.
 
+### The RTO Safety Net
+
+SLEEK is optional (`-sleek` flag). Without it, there must still be a way to recover from genuinely lost packets. This is the job of the **Retransmission Timeout (RTO)** — the oldest and simplest loss recovery mechanism in transport protocols, and the ultimate safety net beneath everything else.
+
+**The question RTO answers:** "If I sent a packet and haven't heard *anything* back within some timeout, assume it's lost and resend it."
+
+#### How the Timeout Is Computed
+
+The minimum RTO is derived from the physical topology — specifically, from the worst-case queue drain time across a diameter-spanning path (`main_uec.cpp:709`):
+
+```
+min_rto = 15µs + queue_size × 6 hops × 8 bits/byte × 10⁶ / linkspeed
+                  ─────────────────────────────────────────────────────
+                  time to drain a full queue at every hop on the longest path
+```
+
+For a typical 100 Gbps, 3-tier fat-tree with 150-packet queues:
+
+```
+  queue drain per hop = 150 × 4160B × 8 / 100Gbps ≈ 50µs
+  6-hop drain time    = 50µs × 6 = 300µs
+  min_rto             = 15µs + 300µs = 315µs
+
+  Compare to base_rtt ≈ 12µs.
+  RTO is ~25× the base RTT — deliberately very conservative.
+```
+
+**Why so conservative?** RTO is the last resort. If it fires prematurely (a "spurious timeout"), it retransmits packets that are still in flight — wasting bandwidth and potentially causing the receiver to see duplicates. In a spraying network, path-latency variance is high (packets on different paths can have very different delays), so a tight RTO would fire frequently on healthy flows. The 15µs base + full drain calculation ensures RTO only fires when something is genuinely stuck.
+
+#### RTO Lifecycle
+
+```
+  sendPacket() → startRTO(now)
+                    │
+         ┌─────────┴──────────┐
+         │   Timer running     │
+         │   _rtx_timeout =    │
+         │   send_time + min_rto│
+         └─────────┬──────────┘
+                   │
+        ┌──────────┼──────────┐
+        ▼          ▼          ▼
+   ACK for that   ACK for     Timer
+   packet arrives  earlier pkt  expires
+        │          │          │
+   cancelRTO()  recalculateRTO()  rtxTimerExpired()
+        │          │          │
+     (done)    restart for     mark_packet_for_rtx()
+               earliest       → cwnd -= pkt_size
+               remaining      → PATH_TIMEOUT to multipath
+               packet         → sendRTS() if needed
+```
+
+Source: `uec.cpp:2023-2069` (start/clear/cancel), `uec.cpp:2332-2455` (recalculate/expire)
+
+Key implementation details:
+- **One timer, earliest packet:** The RTO tracks the oldest un-ACKed packet via `_rto_send_time`. When that packet is ACKed, `recalculateRTO()` cancels the old timer and restarts it for the next-earliest packet in `_send_times`.
+- **cwnd reduction on timeout:** When RTO fires, cwnd is reduced by the timed-out packet's size (`uec.cpp:1319-1322`). This is a mild penalty — unlike Quick Adapt's window reset — just enough to free space for the retransmission.
+- **Multipath feedback:** The timed-out path receives `PATH_TIMEOUT`, the most severe penalty in the Bitmap engine (penalty = `max_penalty = 15`, compared to ECN's 1 or NACK's 4). This ensures the path is strongly avoided for subsequent packets.
+
+#### RTS: Restarting Stalled Connections
+
+What happens when the RTO fires but the sender can't actually retransmit? If cwnd is too small or there's no receiver credit, the sender is stuck — it knows a packet is lost but can't send the replacement. This is where **RTS (Request-To-Send)** steps in (`uec.cpp:2198-2228`).
+
+RTS is a header-only packet (no payload) that asks the receiver: "I need to retransmit but I'm out of credit — please send me a PULL." The receiver processes it like a normal data arrival for credit accounting purposes and responds with an ACK + PULL credit, which unsticks the sender.
+
+```
+  Stalled sender:
+  ────────────────────────────────────────────────
+  cwnd = 4KB, in_flight = 4KB, rtx_queue has 1 packet
+  → can't send: cwnd < in_flight + pkt_size
+  → can't retransmit: no credit (receiver-based CC)
+
+  RTS sent → receiver sees it → issues PULL credit
+  → sender receives credit → retransmits the lost packet
+  → connection resumes
+```
+
+RTS is rate-limited to **one per RTT** (`uec.cpp:2199-2203`) to prevent an RTS incast — if many flows stall simultaneously (e.g., after a widespread loss event), you don't want them all blasting RTS packets at the receiver.
+
+#### SLEEK + RTO Interaction
+
+When both SLEEK and RTO are enabled, they interact carefully (`uec.cpp:2378-2387`): if the sender is already in SLEEK loss recovery mode when RTO fires, the timeout behavior changes. If the timed-out packet hasn't been retransmitted yet (`rtx_times < 1`), the RTO simply recalculates (SLEEK will handle the retransmission). If it *has* been retransmitted once and still timed out, RTO updates the SLEEK high-water mark. This prevents RTO from interfering with SLEEK's more targeted loss recovery.
+
+The retransmission hierarchy, from fastest to slowest:
+
+| Mechanism | Speed | Trigger | Recovery style |
+|-----------|-------|---------|----------------|
+| SLEEK | ~1 cwnd worth of OOO packets | OOO count > 1.5 × cwnd | Selective retransmit in-window |
+| SLEEK Probe | base_rtt + target_Qdelay | Probe ACK with low delay | Enter loss recovery mode |
+| RTO | min_rto (~300µs) | No response at all | Retransmit + RTS + cwnd penalty |
+
+---
+
+## 8a. Transport Plumbing: NIC Model & ACK Generation
+
+The previous sections describe what NSCC *decides* (quadrant selection, window math, retransmission). This section describes the *machinery* that determines when those decisions happen — how fast packets leave the sender, and when ACKs arrive to trigger the next decision.
+
+### The NIC as Rate Limiter
+
+The deep dive's comparison table says NSCC uses "NIC-limited" pacing with "no software pacing." But what does that mean concretely? The answer lives in the `UecNIC` class (`uec.cpp:232-452`), which models a hardware NIC with multiple physical ports.
+
+**The problem NIC-level pacing solves:** Without any pacing, a sender with a large cwnd could dump an entire window's worth of packets into the network instantaneously — creating a burst that overwhelms switch buffers even if the *average* rate is fine. TCP traditionally relies on "ACK clocking" (send one packet per ACK received) to spread out sends. But with batched fulfill adjustments and NOOP quadrants, ACK clocking alone isn't enough.
+
+**How UecNIC works:**
+
+```
+  Host memory                      NIC                         Network
+  ┌──────────┐     request      ┌────────┐     serialized     ┌─────────┐
+  │ UecSrc 1 │────────────────→│ Port 0 │════════════════════│         │
+  │ UecSrc 2 │────────────────→│ Port 1 │════════════════════│  Fabric │
+  │ UecSrc 3 │─── (waiting) ──→│        │                    │         │
+  └──────────┘                  └────────┘                    └─────────┘
+                              round-robin
+                              between sources
+```
+
+1. **Serialization pacing:** Every packet occupies the port for `pkt_size × 8 / linkspeed` time. A 4 KB packet on a 100 Gbps port takes ~0.33 µs. No two packets can overlap on the same port.
+
+2. **Multi-port round-robin:** The NIC models `N` physical ports (typically matching the number of fabric-facing links). Sources are served in round-robin order. If all ports are busy, the source is queued in `_active_srcs` and called back when a port frees up.
+
+3. **Data vs control priority:** When both data packets and control packets (ACKs, NACKs, PULLs, RTS) are waiting, the NIC uses a ratio-based arbiter: 1 data slot for every 10 control slots (`_ratio_data=1`, `_ratio_control=10`). This ensures control traffic — which is small but latency-sensitive — gets priority, preventing ACK starvation during high data throughput.
+
+```
+  Arbitration timeline (simplified):
+  ────────────────────────────────────────────────
+  slot: | D | C | C | C | C | C | C | C | C | C | C | D | C | ...
+         data ctrl ctrl ctrl ctrl ctrl ctrl ctrl ctrl ctrl ctrl data ctrl
+         ←1→ ←──────────── 10 ──────────────────────→ ←1→
+```
+
+Source: `uec.cpp:415-439` (arbitration logic in `doNextEvent`)
+
+4. **Back-pressure:** When a source calls `requestSending()` and all ports are busy, it gets `NULL` back and sets `_send_blocked_on_nic = true`. The NIC calls `timeToSend()` later when a port frees up. This creates natural back-pressure: the sender can't outrun its physical link speed, regardless of how large cwnd is.
+
+**Why this matters for NSCC:** The NIC model is why NSCC doesn't need explicit software pacing (unlike DCQCN's hardware rate limiter). The serialization delay on each port naturally spaces packets at link speed. The round-robin across ports gives multi-port NICs the expected aggregate bandwidth. And the control-priority arbitration ensures ACK feedback isn't delayed behind a burst of data — which would slow down the quadrant decision loop.
+
+### When Does the Sender Get Feedback? ACK Generation
+
+NSCC's responsiveness depends on how quickly ACKs return from the receiver. But ACKs aren't free — each one consumes bandwidth on the return path. The receiver must balance feedback timeliness against ACK overhead.
+
+**The delayed ACK mechanism:** The receiver doesn't ACK every packet. Instead, it accumulates received bytes in `_accepted_bytes` and only sends an ACK when one of three conditions is met (`uec.cpp:2739`):
+
+```
+  Send ACK when:
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 1. ECN marked:    ecn = true                                │
+  │    → Immediate. The sender needs this signal ASAP to enter  │
+  │      the right quadrant. Delaying an ECN-marked ACK defeats │
+  │      the purpose of ECN as a leading indicator.             │
+  │                                                              │
+  │ 2. Byte threshold: _accepted_bytes ≥ _bytes_unacked_threshold│
+  │    → Default: 16 KB (4 MTUs). Tunable via -sack_threshold.  │
+  │      This batches ~4 packets per ACK under normal conditions.│
+  │                                                              │
+  │ 3. ACK Request:   pkt.ar() = true                           │
+  │    → The sender explicitly asked for an ACK. Set when:       │
+  │      • Last packet in the backlog (no more data to send)     │
+  │      • cwnd or credit limit will be hit on next packet       │
+  │    → Prevents the sender from stalling while the receiver   │
+  │      waits to accumulate more bytes.                         │
+  └─────────────────────────────────────────────────────────────┘
+```
+
+Source: `uec.cpp:2701-2706` (AR flag processing), `uec.cpp:2974-2976` (`shouldSack`)
+
+**The AR flag is the sender's lifeline.** Without it, here's what would happen: the sender transmits its last 2 packets (filling the cwnd), then waits for an ACK to open the window. But the receiver has only accumulated 2 packets' worth of bytes — below the 16 KB threshold — so it doesn't send an ACK. Deadlock. The AR flag breaks this by forcing an immediate ACK when the sender knows it's about to stall.
+
+```
+  Without AR:                       With AR:
+  ─────────────                    ─────────────
+  Sender: send pkt 7, pkt 8        Sender: send pkt 7, pkt 8 (AR=true)
+          cwnd full, wait...                cwnd full, wait...
+  Receiver: 8KB < 16KB threshold    Receiver: AR flag → ACK immediately!
+            waiting for more data   Sender: ACK arrives → cwnd opens
+            ...                              → send pkt 9, 10
+            (deadlock)                       → flow continues
+```
+
+**The 64-bit SACK bitmap.** Each ACK carries a 64-bit bitmap (`uec.cpp:3004-3035`) representing which of the next 64 packets after a reference sequence number have been received. This is how the sender learns about out-of-order deliveries without requiring one ACK per packet. The bitmap is built from the receiver's `_epsn_rx_bitmap` — a per-flow tracking structure that records which sequence numbers have arrived. Each bit position maps to a sequence number, and the receiver increments the bitmap value each time a packet is re-SACKed (to avoid redundant retransmissions).
+
+**The feedback timing chain:**
+
+```
+  Data packet sent
+       │
+       │  serialization delay (NIC)
+       │  + propagation delay (fabric)
+       │  + queuing delay (switches)
+       ▼
+  Receiver gets packet
+       │
+       │  Is it ECN-marked? → ACK immediately
+       │  Is AR set?        → ACK immediately
+       │  Otherwise         → accumulate until 16KB threshold
+       ▼
+  ACK sent (via receiver NIC, control priority)
+       │
+       │  propagation delay (return path)
+       ▼
+  Sender processes ACK
+       │
+       │  → quadrant decision (using THIS packet's delay)
+       │  → accumulate inc_bytes (or decrease immediately)
+       │  → if fulfill threshold crossed → adjust cwnd
+       ▼
+  Next send permitted
+```
+
+The total feedback loop time — from send to quadrant decision — is roughly one RTT plus any ACK delay. ECN-marked packets get the fastest feedback (ACK is immediate), which is exactly right: the "smoke detector" signal should arrive as fast as possible. Non-ECN packets may wait up to 4 packets for batching, adding a few microseconds of delay that the slow EWMA filter easily absorbs.
+
 ---
 
 ## 9. Comparison: NSCC vs TCP Cubic vs DCQCN
@@ -1501,13 +1808,17 @@ The figures below show bandwidth share and Jain's Fairness Index across three tr
 Walking through this document, we arrived at each piece of NSCC by asking *what we need* and *what goes wrong* with simpler approaches:
 
 1. **Single-signal CC fails with spraying** → we need two signals (delay + ECN) → four quadrants emerge naturally
-2. **Constant increase overshoots** → proportional increase to headroom → linear ramp `alpha × (target - delay)`
-3. **Fixed decrease overreacts** → proportional decrease to severity → `gamma × (delay - target) / delay` with 50% floor
-4. **Per-ACK updates oscillate** → batched fulfill adjustment → normalized by cwnd for fairness
-5. **Fast filters thrash on path noise** → slow EWMA (α=0.0125) → ~80 samples to steady state
-6. **Iterative decrease too slow for incast** → Quick Adapt resets to achieved throughput → 1-RTT convergence
-7. **Fixed parameters don't scale** → BDP-ratio scaling → same behavior at any network speed
-8. **3-dupACK fails with reordering** → SLEEK with cwnd-scaled threshold → tolerates spraying-induced reorder
+2. **ECN needs calibrated thresholds** → BDP-derived marking (20%/80%) → smoke detector tuned to building size
+3. **Constant increase overshoots** → proportional increase to headroom → linear ramp `alpha × (target - delay)`
+4. **Fixed decrease overreacts** → proportional decrease to severity → `gamma × (delay - target) / delay` with 50% floor
+5. **Per-ACK updates oscillate** → batched fulfill adjustment → normalized by cwnd for fairness
+6. **Fast filters thrash on path noise** → slow EWMA (α=0.0125) → ~80 samples to steady state
+7. **Retransmissions poison RTT samples** → `validateSendTs` disambiguates → clean delay signal under retransmission
+8. **Iterative decrease too slow for incast** → Quick Adapt resets to achieved throughput → 1-RTT convergence
+9. **Fixed parameters don't scale** → BDP-ratio scaling → same behavior at any network speed
+10. **3-dupACK fails with reordering** → SLEEK with cwnd-scaled threshold + RTO safety net → tolerates spraying-induced reorder
+11. **All trims are not equal** → last-hop detection → separate fabric-path penalties from receiver-side congestion
+12. **Feedback timing matters** → delayed ACKs with AR flag + NIC serialization pacing → right balance of throughput and responsiveness
 
 ### Anatomy of One ACK
 
