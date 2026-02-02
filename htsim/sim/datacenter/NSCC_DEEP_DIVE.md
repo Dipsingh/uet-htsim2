@@ -25,10 +25,102 @@ Every formula in this document is **discovered, not stated**. We start with what
 > | **[UET]** | Ultra Ethernet Transport Protocol, arXiv:2508.08906 — [html](https://arxiv.org/html/2508.08906v1) |
 > | **[SMaRTT-REPS]** | SMaRTT-REPS: Sender-based Marked Rapidly-adapting Trimmed & Timed Transport with Recycling Entropies for Path Selection, arXiv:2404.01630 — [html](https://ar5iv.labs.arxiv.org/html/2404.01630v3) |
 > | **[DCTCP]** | Data Center TCP (DCTCP), RFC 8257, IETF, 2017 |
-> | **[TCP Cubic]** | CUBIC for Fast and Long-Distance Networks, RFC 9438, IETF, 2024 |
+> | **[TCP Cubic]** | CUBIC for Fast and Long-Distance Networks, RFC 9438, IETF, 2023 |
 > | **[DCQCN]** | Y. Zhu et al., "Congestion Control for Large-Scale RDMA Deployments," ACM SIGCOMM 2015 |
 > | **[TIMELY]** | R. Mittal et al., "TIMELY: RTT-based Congestion Control for the Datacenter," ACM SIGCOMM 2015 |
 > | **[Swift]** | G. Kumar et al., "Swift: Delay is Simple and Effective for Congestion Control in the Datacenter," ACM SIGCOMM 2020 |
+
+> **Reading guide:** This doc follows implementation behavior; if you only care about spec behavior, read §2 + §5 + §6 + §9.
+
+---
+
+## NSCC in 60 Seconds
+
+Before diving in, here is the entire algorithm on one page.
+
+**(A) Controlled variable:** `cwnd` (bytes) — the congestion window. One knob for all paths.
+
+**(B) Two signals per ACK:**
+
+| Signal | What it is | How it's measured |
+|--------|-----------|-------------------|
+| `qdelay` | Queueing delay: time spent in switch queues | `qdelay = raw_rtt − base_rtt` (per-ACK, continuous) |
+| `ecn` | ECN mark: a switch flagged congestion on *this* path | Binary (marked or not) |
+
+**(C) Four-quadrant decision table (direction only):**
+
+| | No ECN (`M=0`) | ECN (`M=1`) |
+|---|---|---|
+| **Low delay** (`D=0`: `qdelay < target`) | ↑ Proportional Increase | — NOOP (steer path) |
+| **High delay** (`D=1`: `qdelay ≥ target`) | ↗ Fair Increase (gentle) | ↓ Multiplicative Decrease |
+
+Plus: if delay is extreme → **Quick Adapt** emergency reset.
+
+**(D) Four timescales (nested):**
+
+```
+  time →
+  ├─ ACK ─┤                                          ← per-ACK (~0.15µs between ACKs)
+  │        │                                            raw qdelay → quadrant direction
+  │        │                                            ECN flag   → quadrant direction
+  │        │
+  ├──── fulfill period ────┤                          ← ~8 MTUs or ~1 RTT (~12µs)
+  │  (accumulate _inc_bytes │                            cwnd += _inc_bytes / cwnd
+  │   from many ACKs)       │                            + eta (liveness floor)
+  │                         │
+  ├────────── EWMA time constant ──────────────────┤  ← ~80 ACK-events (several RTTs)
+  │  (α=0.0125 filter absorbs per-path noise)      │    avg_delay → decrease magnitude
+  │                                                 │
+  ├────────────── QA window ───────────────────────┤  ← base_rtt + target_Qdelay (~21µs)
+  │  (measure achieved_bytes over one full          │    if achieved < maxwnd/8
+  │   feedback cycle; reset if severely stalled)    │    → emergency cwnd reset
+  └─────────────────────────────────────────────────┘
+
+  Shortest ◄──────────────────────────────────► Longest
+  per-ACK     fulfill        EWMA            QA window
+  (~0.15µs)   (~12µs)        (~several RTTs)  (~21µs per check)
+```
+
+Each inner timescale feeds the next: per-ACK samples drive the EWMA and accumulate into `_inc_bytes`; the fulfill period applies the accumulated increase; the QA window checks whether the whole system is working. The key insight is that the **quadrant decision** (fastest) and the **decrease magnitude** (slowest filter) deliberately operate at different speeds — fast trigger, slow actuator.
+
+---
+
+## Glossary & Units
+
+| Symbol | Units | Definition |
+|--------|-------|------------|
+| `raw_rtt` | µs | Measured round-trip time for one packet |
+| `base_rtt` | µs | Min / estimated unloaded RTT (the "zero point") |
+| `qdelay` | µs | Queueing delay estimate: `raw_rtt − base_rtt` |
+| `target_Qdelay` | µs | Queueing delay target threshold (divides low/high delay) |
+| `avg_delay` | µs | Slow EWMA of qdelay (α = 0.0125, ~80 samples to 63%) |
+| `network_rtt` | µs | Topology-derived RTT baseline (diameter-spanning worst case) |
+| `BDP` | bytes | Bandwidth-Delay Product: `base_rtt × linkspeed / 8` |
+| `MSS` / `MTU` | bytes | Packet payload size — **4 KB (4096 bytes) in this simulator** (not the usual 1500 B) |
+
+---
+
+> **Common Confusions**
+>
+> Before you start, five things that trip up almost everyone:
+>
+> 1. **"Delay" = queueing delay, not raw RTT.** Everywhere in this doc, "delay" means `qdelay = raw_rtt − base_rtt` — the *excess* time packets spent in queues, not the total round-trip time.
+> 2. **Quadrant decision uses per-packet raw `qdelay`, not the EWMA.** The slow `avg_delay` filter only enters in the *magnitude* of multiplicative decrease (§3), not in *which quadrant* is chosen.
+> 3. **Cut magnitude uses EWMA `avg_delay`, not raw `qdelay`.** A single bad-path sample won't cause a huge window cut — the slow filter absorbs it.
+> 4. **NOOP only makes sense if the load balancer responds to ECN feedback.** Without active path steering (Bitmap/REPS), NOOP would ignore congestion that nothing else fixes.
+> 5. **`network_rtt`, `base_rtt`, and `target_Qdelay` are three different things.** `network_rtt` is a topology estimate (seed value); `base_rtt` is per-flow and refines downward; `target_Qdelay` is the acceptable queueing *on top of* base RTT.
+
+---
+
+### Three Coupled Control Loops
+
+NSCC is best understood as three interacting loops, each operating at a different scope:
+
+1. **Window loop** (§2–§4): Keeps average congestion near `target_Qdelay` by adjusting `cwnd` based on the four-quadrant decision. This is the core steady-state controller.
+2. **Path loop** (§6): Avoids hot paths by penalizing entropy values that produced ECN or NACK feedback. The NOOP quadrant only makes sense in the context of this loop — it defers the cwnd reaction so the path loop can act first.
+3. **Emergency loop** (§5): Quick Adapt resets the window when it is wildly wrong (e.g., sudden incast). Fires when `achieved_bytes` is far below `maxwnd`, bypassing the iterative decrease path entirely.
+
+The loops are coupled: the window loop's NOOP quadrant hands off to the path loop; the emergency loop overrides the window loop when iterative convergence would be too slow. Understanding which loop dominates in a given scenario is the key to predicting NSCC's behavior.
 
 ---
 
@@ -38,7 +130,7 @@ Every formula in this document is **discovered, not stated**. We start with what
 >
 > After reading this document you should be able to:
 >
-> 1. **Explain** why two orthogonal signals (delay + ECN) are necessary in a multi-path spraying fabric, and how they produce four distinct congestion quadrants.
+> 1. **Explain** why two complementary signals (delay + ECN) are necessary in a multi-path spraying fabric, and how they produce four distinct congestion quadrants.
 > 2. **Derive** the proportional increase and decrease formulas from first principles — constant increase overshoots, quadratic is too timid, linear headroom is "just right."
 > 3. **Trace** a single ACK through the full NSCC pipeline: delay extraction → quadrant classification → window update → multipath feedback.
 > 4. **Compare** NSCC with TCP Cubic, DCQCN, DCTCP, and Swift using the *Knob + Signal + Assumptions* framework.
@@ -54,6 +146,8 @@ Single-path:  Sender ──────────────── Receiver
 ```
 
 Every packet sees the same queue, the same delay, and the same congestion. If delay goes up, that *is* the network state. Simple.
+
+> We use **queueing delay** throughout this document: `qdelay = raw_rtt − base_rtt` — how long packets sit in switch queues beyond the irreducible propagation time. When we say "delay" without qualification, we mean this excess queueing component, not the total round-trip time.
 
 But modern datacenter fabrics spray packets across many equal-cost paths:
 
@@ -72,7 +166,7 @@ This is the fundamental tension NSCC resolves. Its answer: **use two signals, no
 
 ### Where NSCC Fits
 
-NSCC is a **delay + ECN hybrid** that uses two orthogonal signals to classify network state into four quadrants, each triggering a distinct response. This gives it proportional control: it doesn't just "increase or decrease" but modulates *how aggressively* it does each.
+NSCC is a **delay + ECN hybrid** that uses two complementary signals to classify network state into four quadrants, each triggering a distinct response. This gives it proportional control: it doesn't just "increase or decrease" but modulates *how aggressively* it does each.
 
 **The Bandwidth-Delay Product (BDP).** The fundamental physical quantity governing any window-based CC is:
 
@@ -80,7 +174,7 @@ NSCC is a **delay + ECN hybrid** that uses two orthogonal signals to classify ne
 BDP = B × R₀
 ```
 
-where **B** is the bottleneck bandwidth (bytes/s) and **R₀** is the base round-trip time (the propagation delay with zero queuing). BDP tells you how many bytes can be "in flight" before the first ACK returns. NSCC's actuator is a **window of outstanding bytes** — the congestion window (`cwnd`) — and the algorithm's job is to keep `cwnd` near `BDP`:
+where **B** is the bottleneck bandwidth (bytes/s) and **R₀** is the base round-trip time (the propagation delay with zero queuing). BDP tells you how many bytes can be "in flight" before the first ACK returns. NSCC's actuator is a **window of outstanding bytes** — the congestion window (`cwnd`) — and the algorithm's job is to keep `cwnd` near `BDP`. The window governs total in-flight bytes across *all* paths; spraying changes the *distribution* of those bytes, not their total. BDP is still the right target.
 
 | Regime | Meaning | Consequence |
 |--------|---------|-------------|
@@ -100,6 +194,19 @@ For a concrete example: at 400 Gbps with R₀ = 12 µs, `BDP = 50 GB/s × 12 µs
 
 ## 2. NSCC Core Algorithm: The Four Quadrants
 
+> **Definitions used throughout §2–§4:**
+> ```
+>   raw_rtt  = measured RTT sample on an ACK
+>   base_rtt = minimum/unloaded RTT estimate
+>   qdelay   = raw_rtt - base_rtt   (queueing delay estimate)
+>   D        = (qdelay >= target_Qdelay)   — 1 if high delay, 0 if low
+>   M        = (ecn_mark == 1)             — 1 if marked, 0 if not
+>
+>   Decision: (D,M) → action
+>     (0,0): proportional_increase     (1,0): fair_increase
+>     (0,1): NOOP (steer path)         (1,1): multiplicative_decrease
+> ```
+
 ### Discovering the Decision Matrix
 
 Let's design a congestion control algorithm from scratch for a spraying network. We'll start with the simplest possible approach and see where it breaks.
@@ -112,33 +219,63 @@ We measure queuing delay on every ACK. If delay is above a target, decrease the 
   16 paths total. Path 5 is congested (delay = 20µs).
   All other paths: delay ≈ 2µs.
 
-  Average delay across recent ACKs:
-    (15 × 2µs + 1 × 20µs) / 16 = 3.1µs
+  Population average (if you could see all paths at once):
+    (15 × 2µs + 1 × 20µs) / 16 = 3.1µs   → below a 6µs target, fine.
 
-  If our target is 6µs → average is BELOW target → INCREASE!
+  But ACKs don't arrive as a neat census of all 16 paths. They arrive
+  one at a time, each from a random path. Individual samples are either
+  ~2µs (good path) or ~20µs (bad path) — never 3.1µs. The 3.1µs is a
+  statistical average you'd converge to over *many* samples, not what
+  any single measurement looks like.
 
-  But what if we get 3 packets from Path 5 in a row?
-    Average shifts to ~8µs → ABOVE target → DECREASE!
+  Now suppose we use a running average of the last 3 samples to decide.
+  Here's a plausible 8-ACK sequence (path chosen randomly):
+
+    samples:  [2, 2, 20, 20, 20, 2, 2, 2]   (µs)
+    avg of 3:  —  —  8   14  20  14  8   2
+
+  With a target of 6µs:
+    sample 3–5: avg > target → DECREASE
+    sample 6–8: avg < target → INCREASE
 
   Result: oscillation driven by sampling noise, not real congestion.
 ```
 
-The problem: delay alone mixes per-path congestion with global congestion. A single hot path can randomly push the average above or below the target depending on which ACKs arrive recently.
+The problem: delay alone can't distinguish "this path is hot" from "the whole network is hot." Any running average that responds quickly to recent samples will yo-yo across the target threshold whenever a statistical cluster of bad-path (or good-path) samples arrives. The shorter the averaging window, the worse the oscillation. In statistical terms, your RTT samples are drawn from a **mixture distribution** — one component per path. No single-point estimator (mean, median, recent average) cleanly separates the mixture components.
+
+NSCC solves this with a very slow EWMA filter (§4) that needs ~80 samples to move significantly — far more than a random cluster. Smoothing reduces classification *instability* (the yo-yo), but it doesn't tell you whether congestion is local (one path) or global (everywhere). That's what adding ECN as a second signal solves. For now, the takeaway: **delay alone can't tell you whether a single path is congested or the whole network is congested**, and a fast running average makes the problem worse, not better.
 
 **Attempt 2: Add a second signal — ECN.**
 
-ECN marks tell us something delay doesn't: *a specific switch on a specific path* decided it was congested. If we get an ECN mark, we know *that path* is congested. If we don't, the path was fine — even if the delay was high (maybe the packet just queued briefly at a non-congested switch).
+ECN marks tell us something qdelay doesn't: some hop on this packet's path decided the queue was deep enough to cross a marking threshold. If we see an ECN mark, we know *this specific path* experienced "queue above mark-threshold" somewhere.
 
-Now we have two independent signals, each binary. That gives us **four combinations**.
+If we do NOT see an ECN mark, the packet did not cross any marking thresholds on its path. That does not mean "zero queuing" — it only means queuing (if any) stayed below the marking policy, or occurred on a segment that doesn't mark (misconfiguration, disabled ECN, receiver-side queueing, etc.).
+
+Now we have two complementary signals, each binary. That gives us **four combinations**.
 
 But before we work through them, notice something crucial about *when* each signal arrives:
 
-- **ECN is a leading indicator**: a switch marks a packet *at the moment of congestion*. If queues start building, you see ECN marks within one link-hop of the congestion point — fast, but only 1 bit of information (congested or not).
-- **RTT is a trailing indicator**: you only learn the delay *after* the packet has traversed the entire path, been processed, and the ACK has returned. RTT can remain elevated even after queues have started draining and ECN marks have stopped. It's multi-bit (tells you *how much* congestion), but it lags.
+- **ECN is a leading indicator**: a switch marks a packet *at the moment of congestion*. Both ECN and RTT information arrive at the sender on ACK timescale (~one RTT), but ECN is "leading" in the sense that **marking can trigger before queues inflate enough to push RTT above the target threshold**. ECN fires at the onset of congestion; RTT only reflects it once enough queueing has accumulated. Fast, but only 1 bit of information (congested or not).
+- **RTT is a trailing indicator**: you only learn the delay *after* the packet has traversed the entire path, been processed, and the ACK has returned. RTT can remain elevated even after queues have started draining and ECN marks have stopped. It's multi-bit (tells you *how much* congestion), but it lags behind the onset and clearing of congestion events.
+
+```
+  Leading vs trailing timeline:
+
+  time →  t0              t0+Δ             t0+RTT
+          │                │                 │
+          ▼                ▼                 ▼
+          Queue crosses    Queue crosses     Sender sees
+          ECN marking      target delay      elevated RTT
+          threshold        threshold         (trailing)
+          (leading)        (may lag ECN
+                            by Δ)
+```
 
 This "leading vs trailing" asymmetry is the key to interpreting the four quadrants. When the two signals agree, the situation is clear. When they disagree, the disagreement itself tells you something — specifically, it tells you whether congestion is *building* or *clearing*.
 
 > **Note: both signals become binary for the quadrant decision.** ECN is inherently binary (marked or not). RTT/delay is *continuous*, but NSCC **bins** it into low/high using the `target_Qdelay` threshold. So the four-quadrant matrix operates on two binary inputs. The continuous *magnitude* of delay re-enters later — inside `multiplicative_decrease()` (§3), where `avg_delay` determines *how much* to cut. This "binary for direction, continuous for magnitude" split is central to the design; §4 explains it in full.
+>
+> Compact notation: define `D = (qdelay ≥ target_Qdelay)` and `M = ecn`. The decision matrix maps `(D, M) → action`: `(0,0)→increase`, `(1,0)→fair_increase`, `(1,1)→decrease`, `(0,1)→NOOP`.
 
 **Let's work through each one:**
 
@@ -146,26 +283,44 @@ This "leading vs trailing" asymmetry is the key to interpreting the four quadran
 
 2. **High delay, ECN** — "What should we do?" The network is congested *and* marking us. Obviously: **decrease**. And decrease proportionally to how far above the target the delay is — the worse the congestion, the harder we back off.
 
-3. **Low delay, ECN** — "This is the interesting one." The leading indicator (ECN) says congestion is building, but the trailing indicator (RTT) hasn't caught up yet — delay is still low. In a spraying network, this most likely means *one specific path* is congested while the rest are fine. The right answer: **don't change the window** — just avoid that path next time. This is NSCC's key innovation: the NOOP quadrant.
+3. **Low delay, ECN** — "This is the interesting one." The leading indicator (ECN) says congestion is building, but the trailing indicator (RTT) hasn't caught up yet — delay is still low. In a spraying network, this most likely means *one specific path* is congested while the rest are fine. The right answer: **don't change the window** — just avoid that path next time. This is NSCC's key innovation: the NOOP quadrant. NOOP is a *design choice* — a "steer-first" policy that only makes sense when the load-balancer can respond to per-path ECN feedback. SMaRTT-REPS uses a gentle decrease instead; both are valid.
 
-4. **High delay, no ECN** — "What does this mean?" The trailing indicator (RTT) is elevated, but the leading indicator (ECN) has gone quiet. The UET paper interprets this as **"congestion is going down"**: queues were high recently (RTT still reflects that), but switches have stopped marking (the congestion is clearing). The right answer: **increase gently** — the situation is improving, so nudge the window up conservatively rather than aggressively.
+4. **High qdelay, no ECN** (D=1, M=0) — "Why is there delay without fresh marking?"
+
+   **Interpretation (common case):** congestion is *receding*. Earlier packets saw deep queues (and may have been marked), but by the time this packet traversed the path the queue had dropped below marking thresholds, so M=0 even though the end-to-end qdelay is still above target.
+
+   **Action:** increase gently via `fair_increase`. This is a cautious probe, not "business as usual" growth.
+
+   **Guardrails:** if marks resume → immediate move to Q2 (multiplicative decrease). If qdelay stays extreme → Quick Adapt resets. And cwnd is always capped by maxwnd. So Q0's gentle increase is safe even if the "clearing" heuristic is occasionally wrong.
+
+   *(Caveat: high qdelay without ECN could also mean ECN thresholds are miscalibrated, ECN is disabled on some hop, or delay is accumulating on a path segment that doesn't mark. The "congestion clearing" interpretation is the common case in a well-configured spraying fabric, but it's worth knowing the alternatives.)*
+
+   **Micro-example — Q0 (D=1, M=0) in action:**
+
+   Assume `target_Qdelay = 3µs` and the switch starts probabilistic ECN marking at ~6µs of queueing delay (a relatively high marking threshold relative to this target).
+   ```
+   t=0:    Queueing delay at a bottleneck spikes to ~10µs → above marking threshold → marked packets exist
+   t=2µs:  Queue drains to ~5µs → below marking threshold → new packets are unmarked
+   t=RTT:  ACK for an unmarked packet returns with qdelay ≈ 4µs (> target 3µs) but M=0 → Q0
+   ```
+   Interpretation: the queue is coming down (no fresh marks), but we're still above our *delay target*, so we only probe upward gently via fair_increase.
 
 Here's the resulting decision space:
 
 ```
-        RTT (trailing)
+      qdelay (trailing)
            ↑
            │  FAIR            MULTIPLICATIVE
            │  INCREASE        DECREASE
-           │  (congestion     (both signals
-           │   clearing)       agree: bad)
+           │  (D=1, M=0:      (D=1, M=1:
+           │   clearing)       both bad)
     target ┤╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶
            │  PROPORTIONAL
            │  INCREASE        NOOP
-           │  (both signals   (congestion
-           │   agree: good)    building)
+           │  (D=0, M=0:      (D=0, M=1:
+           │   both good)      building)
            └──────────────────────────────→ ECN (leading)
-                              (skip=true)
+                              (M=1)
 ```
 
 We didn't *invent* four quadrants — we *discovered* them by asking what the right response is for each combination of two orthogonal signals.
@@ -198,12 +353,14 @@ Between `ecn_low` and `ecn_high`, the switch probabilistically marks packets (th
 
 **Interaction with NSCC:** These thresholds determine *when* the sender sees the ECN signal that drives quadrant selection. If `ecn_low` is set too high, queues can build significantly before any marks appear — the sender stays in Q1 (proportional increase) longer than intended, and by the time marks arrive, delay is already elevated (jumping straight to Q2 rather than getting the Q3/NOOP opportunity). If `ecn_low` is too low, the smoke detector is over-sensitive — marks appear from minor transient bumps, causing excessive NOOP quadrant entries even when the fabric is healthy.
 
+> *Note: These are this simulator's AQM configuration; real switches may use different marking curves, thresholds, or algorithms (e.g., RED, WRED, or step-function marking). The four-quadrant logic works with any AQM that produces ECN marks — the specific thresholds affect when marks appear, not how NSCC processes them.*
+
 ### The Actual Implementation
 
-| | **No ECN** (`skip=false`) | **ECN** (`skip=true`) |
+| | **No ECN** (`M=0`) | **ECN** (`M=1`) |
 |---|---|---|
-| **Delay < Target** (RTT low) | **Proportional Increase** | **NOOP** (defer to load balancer) |
-| **Delay ≥ Target** (RTT high) | **Fair Increase** (gentle) | **Multiplicative Decrease** |
+| **qdelay < target** (`D=0`) | **Proportional Increase** | **NOOP** (defer to load balancer) |
+| **qdelay ≥ target** (`D=1`) | **Fair Increase** (gentle) | **Multiplicative Decrease** |
 
 Source: `uec.cpp:1310-1335` (`updateCwndOnAck_NSCC`)
 
@@ -211,10 +368,10 @@ The logic maps directly:
 
 ```
 if quick_adapt fires → return early
-if (!ecn && delay >= target) → fair_increase
-if (!ecn && delay < target)  → proportional_increase
-if (ecn  && delay >= target) → multiplicative_decrease
-if (ecn  && delay < target)  → NOOP
+if (D=1, M=0)  (!ecn && qdelay >= target) → fair_increase
+if (D=0, M=0)  (!ecn && qdelay <  target) → proportional_increase
+if (D=1, M=1)  ( ecn && qdelay >= target) → multiplicative_decrease
+if (D=0, M=1)  ( ecn && qdelay <  target) → NOOP
 ```
 
 **Important detail:** The `delay` variable in the quadrant decision is the **raw per-packet** queuing delay (`raw_rtt - base_rtt`, `uec.cpp:973`), not the filtered average. This means the quadrant is chosen based on what *this specific packet* experienced, not a smoothed history. The filtered average only appears later, inside `multiplicative_decrease()` (`uec.cpp:1243`), where it determines the *magnitude* of the cut. Section 4 explains why this split matters.
@@ -330,11 +487,15 @@ We know we need to increase the window when delay is below the target. But *what
 This is the Goldilocks choice. The linear ramp gives us:
 - Maximum aggressiveness when the network is empty (delay ≈ 0)
 - Gentle approach as we near the target (no overshoot)
-- Zero increase exactly at the target (smooth transition to fair_increase)
+- Zero proportional increase exactly at the target (the ramp naturally tapers off)
+
+Crossing the target is a **mode switch**: above target with no ECN, NSCC enters the `fair_increase` probe regime (Q0), which applies a small constant increase rather than the proportional ramp. This is intentionally conservative — not a smooth continuation of the ramp, but a deliberate shift to a gentler, heavily guardrailed mode.
 
 This is exactly what NSCC implements in its proportional increase.
 
-### Three Tiers of Increase
+> *Every increase formula below contains a `scaling_factor_a` term (and sometimes `scaling_factor_b`). These are simple ratios that scale the algorithm from a 100G reference network to whatever speed you're actually running — `scaling_factor_a = your_BDP / reference_BDP`, `scaling_factor_b = target_Qdelay / reference_RTT`. For a 400G network, `scaling_factor_a = 4.0` (4× the reference BDP, so increase 4× faster). §7 derives these fully; for now, just read them as "adjust for network size." In the reference 100G/12µs network, `scaling_factor_a = 1.0` and `scaling_factor_b = 0.75`, so the base constants below are approximately what you'd see in practice at 100G.*
+
+### Four Increase Mechanisms
 
 NSCC has four increase mechanisms with distinct aggressiveness:
 
@@ -349,6 +510,8 @@ _cwnd += newly_acked_bytes * _fi_scale;     // _fi_scale = 0.25 * scaling_factor
 ```
 
 This is applied *immediately* to `_cwnd`, bypassing the fulfill accumulator. It's the "network is empty, fill it fast" mode.
+
+> *Why 0.25? Over one RTT you ACK roughly `cwnd` bytes, so fast increase adds ~25% of cwnd per RTT — roughly exponential growth at 1.25× per RTT. Starting from 1 MTU (4KB), you reach the reference 100G BDP (150KB) in roughly 16 RTTs (~192µs) — order of magnitude, assuming the path stays empty. Fast enough for datacenter startup, but not so aggressive that a single RTT of queueing causes massive overshoot. At the reference network (scaling_factor_a = 1.0), `fi_scale = 0.25` — each ACK adds a quarter of its acknowledged bytes to the window. At 400G (scaling_factor_a = 4.0), `fi_scale = 1.0` — each ACK doubles the growth rate to match the 4× larger pipe.*
 
 **Proportional Increase** (`uec.cpp:1208-1219`): Accumulates into `_inc_bytes`:
 
@@ -366,11 +529,26 @@ What does alpha actually control? It converts `(target - delay)` — a time quan
 _inc_bytes += _fi * newly_acked_bytes;      // _fi = 5 * MSS * scaling_factor_a
 ```
 
+> *Why 5 × MSS? Fair increase adds `5 × MSS × scaling_factor_a` bytes to the accumulator per cwnd-worth of ACKs. At the reference network, `fi = 5 × 4KB = 20KB` — this accumulates ~20KB per RTT before fulfill normalization. The "5" makes this ~5× more aggressive than classic TCP's 1-MSS-per-RTT additive increase; datacenter RTTs are ~1000× shorter than WAN RTTs, so convergence at TCP's rate would take impractically many RTTs. This is the gentle-probe mode for Q0 — when qdelay is at or above target but ECN marks are absent (congestion clearing, ECN misconfiguration, or receiver-side queueing). It's deliberately the slowest increase tier.*
+>
+> *Why is increasing at all reasonable when delay is high (Q0)? Because the absence of ECN marks means congestion is clearing — the sender is seeing **delay inertia** without **fresh marking**. Safety guardrails prevent runaway: if marks resume → Q2 (decrease); if delay stays extreme → QA fires; window is capped at maxwnd. Fair increase is the gentlest positive action, appropriate for a situation that is improving but not yet resolved.*
+
 **Eta** (`uec.cpp:1269`): A minimum additive increase applied once per adjustment period regardless of other actions:
 
 ```cpp
 _cwnd += _eta;                              // _eta = 0.15 * MSS * scaling_factor_a
 ```
+
+> *Why 0.15 × MSS? Eta is the liveness guarantee — even when other mechanisms suppress growth (e.g., repeated multiplicative decreases, long stretches of NOOP while the load balancer is trying to steer, or sparse ACK cadence), the window still creeps upward by ~0.15 packets per adjustment period. This prevents permanent starvation without fighting the decrease signal. It's deliberately tiny: at the reference network, a flow at BDP (~150 packets) would take ~1000 adjustment periods to grow by one BDP from eta alone.*
+
+> **Concrete magnitudes at the reference 100G/12µs network** (scaling_factor_a = 1.0, BDP = 150KB, MSS ≈ 4KB):
+>
+> | Mechanism | Raw magnitude | Growth character | When it fires |
+> |---|---|---|---|
+> | fast_increase | +25% of cwnd per RTT (fi_scale=0.25) | Exponential — fills 150KB pipe in ~16 RTTs | delay < 1µs (network empty) |
+> | proportional_increase | alpha × headroom per ACK | Linear ramp — fast when empty, gentle near target | Q1/Q3 (delay < target) |
+> | fair_increase | ~20KB accumulated per RTT (fi=20KB) | Additive — like TCP but 5× faster | Q0 (high delay, no ECN) |
+> | eta | 614B per adjustment period | Creep — liveness floor only | Always |
 
 ### Designing the Decrease Function
 
@@ -403,9 +581,9 @@ Let's plot what this looks like as delay increases:
      1    1.5   2    3    5
 ```
 
-The cut depth scales with how far above the target we are. At exactly the target, no cut. At 2× the target, a 40% cut. And we never cut more than 50% — because overshooting the decrease is just as bad as undershooting.
+The cut depth scales with how far above the target we are (`d` = `avg_delay` throughout — the smoothed average, not a single packet's delay). At exactly the target, no cut. At 2× the target, a 40% cut. And we never cut more than 50% — because overshooting the decrease is just as bad as undershooting.
 
-Why divide by `d` (actual delay) instead of `t` (target)? Because `(d-t)/d` is the **fraction of delay that is excess** — it ranges from 0 (at target) to 1 (as delay → ∞). This means `γ × (d-t)/d` asymptotically approaches γ but never exceeds it. If we divided by `t` instead, the cut fraction `γ × (d-t)/t` would grow without bound — at d = 10t, it would be `0.8 × 9 = 7.2`, which is meaningless (you can't cut 720% of a window). The `/d` normalization naturally bounds the cut to [0, γ], and the `max(..., 0.5)` floor provides an additional safety margin ensuring the window never loses more than half its value in one step.
+Why divide by `d` (`avg_delay` — the EWMA-smoothed delay, not any single packet's raw delay) instead of `t` (target)? Because `(d-t)/d` is the **fraction of delay that is excess** — it ranges from 0 (at target) to 1 (as delay → ∞). This means `γ × (d-t)/d` asymptotically approaches γ but never exceeds it. If we divided by `t` instead, the cut fraction `γ × (d-t)/t` would grow without bound — at d = 10t, it would be `0.8 × 9 = 7.2`, which is meaningless (you can't cut 720% of a window). The `/d` normalization naturally bounds the cut to [0, γ], and the `max(..., 0.5)` floor provides an additional safety margin ensuring the window never loses more than half its value in one step.
 
 **"What if?" — Exploring the gamma parameter:**
 
@@ -439,6 +617,8 @@ if (avg_delay > _target_Qdelay) {
 }
 ```
 
+*(`avg_delay` is a heavily-smoothed running average of recent delay samples — not any single packet's delay. We'll build this filter from scratch in §4; for now, think of it as "what the delay has been like over the last ~80 ACKs, resistant to per-path noise.")*
+
 Key properties:
 - **Rate-limited**: Only fires once per base RTT (`_last_dec_time` guard)
 - **Proportional**: Cut depth depends on `(avg_delay - target) / avg_delay`
@@ -452,6 +632,14 @@ Key properties:
 Conceptually, NSCC/SMaRTT updates on every ACK reception. In practice, implementations may batch updates — and this turns out to work well. The SMaRTT-REPS paper observes that "reacting only once every 50 packets does not significantly impact SMaRTT performance, which is within 5% of the per-packet reaction scenario." Reaction frequency is a tuning axis, not a fixed requirement.
 
 This implementation uses a **two-phase approach**: accumulate signals from many ACKs, then apply one normalized adjustment periodically. This avoids oscillation from noisy per-ACK signals and ensures fair convergence between flows.
+
+> **Units sanity check (why `_inc_bytes` looks weird):** In this implementation, `_inc_bytes` is not "bytes to add to cwnd" directly. It's an accumulated *increase credit* that becomes bytes only after normalization:
+>
+> - proportional: `_inc_bytes += (bytes/µs) × bytes × µs → bytes²`
+> - fair: `_inc_bytes += bytes × bytes → bytes²`
+> - fulfill: `cwnd += _inc_bytes / cwnd → bytes² / bytes = bytes`
+>
+> So treat `_inc_bytes` as a scaled accumulator whose purpose is to produce an inverse-cwnd step after division — like TCP's `MSS²/cwnd` behavior, but batched. The "bytes²" intermediate is an artifact of deferring normalization to the fulfill step.
 
 #### Phase 1: Accumulation (every ACK)
 
@@ -482,6 +670,8 @@ When the batch fires, the accumulated value is **normalized by dividing by the c
 // uec.cpp:1260
 _cwnd += _inc_bytes / _cwnd;
 ```
+
+> This turns raw additive accumulation into an inverse-cwnd step — like TCP's classic `+MSS²/cwnd` effect, but applied in batch form. Large flows take small steps; small flows take large steps → convergence to fairness.
 
 #### Why Divide by _cwnd? — Convergence to Fairness
 
@@ -530,6 +720,15 @@ ACK 8:  _received_bytes crosses 8*MTU threshold
 
 NSCC listens to many ACKs, aggregates their signals, and then makes one calm, normalized adjustment every ~8 packets or ~1 RTT, whichever comes first.
 
+> **A useful cancellation (why normalization works):**
+>
+> Over roughly one RTT of ACKs, total `newly_acked_bytes ≈ cwnd`. So:
+>
+> - *proportional_increase:* `_inc_bytes ≈ alpha × cwnd × (target − qdelay)` → fulfill: `cwnd += _inc_bytes / cwnd ≈ alpha × (target − qdelay)`
+> - *fair_increase:* `_inc_bytes ≈ fi × cwnd` → fulfill: `cwnd += _inc_bytes / cwnd ≈ fi`
+>
+> After batching and normalization, the cwnd step depends on *headroom* (for proportional) or a *fixed probe size* (for fair), not directly on cwnd. This is why two flows with different cwnd values but the same headroom converge — the cwnd cancels out.
+
 ### Window Bounds
 
 ```cpp
@@ -550,13 +749,17 @@ The figure below shows Jain's Fairness Index and per-flow throughput distributio
 
 ### Designing a Trustworthy Thermometer
 
-NSCC's decisions depend on accurate delay measurement. But in a spraying network, each ACK's delay comes from a *different path*. Some paths are congested, most aren't. How do you build a delay signal that reflects *overall* network state rather than per-path noise?
+Remember the oscillation problem from §2? We had 16 paths, one congested, and showed that a fast running average bounces above and below the target on sampling noise alone. We then noted in §3 that `avg_delay` — used in the multiplicative decrease formula — is a "heavily-smoothed" value resistant to per-path noise. Here we build the filter that delivers on that promise.
+
+The core challenge: in a spraying network, each ACK's delay comes from a *different path*. Some paths are congested, most aren't. How do you build a delay signal that reflects *overall* network state rather than per-path noise?
 
 The answer: a very slow-moving EWMA (Exponentially Weighted Moving Average) filter.
 
 ### Base RTT: The Zero Point of the Thermometer
 
-Every thermometer needs a zero point. For NSCC, that zero point is **base RTT** — the round-trip time a packet would experience if every queue in its path were completely empty. All congestion measurement derives from this reference:
+Every thermometer needs a zero point. For NSCC, that zero point is **base RTT** — the round-trip time a packet would experience if every queue in its path were completely empty. All congestion measurement derives from this reference.
+
+> Base RTT has two sources: a **topology estimate** (initial seed from configuration) and a **measurement-based refinement** (per-flow min-sample tracking). The topology estimate bootstraps the system; the min-sample logic is the real stabilizer. Both are described below.
 
 ```
   measured_rtt = base_rtt + queuing_delay
@@ -665,7 +868,7 @@ The "only decrease" rule means base RTT converges toward the *true minimum RTT* 
 
 **Why only decrease?** Consider the alternative — if base RTT could also *increase*, then a burst of congestion would raise the baseline, making the algorithm think "this higher RTT is normal." It would then underestimate queuing delay for all subsequent packets, becoming less responsive to congestion precisely when it should be more responsive. The monotonic-decrease design ensures base RTT always reflects the *best* conditions the flow has ever seen, which is the closest proxy for the true propagation delay.
 
-**The NACK update flag:** NACKs (trimmed packets) carry RTT information too, since the receiver stamps them with arrival time. By default, NSCC uses NACK RTTs to refine base RTT. The `-disable_base_rtt_update_on_nack` flag turns this off, which can be useful if trimmed packets experience unusual forwarding delays that would artificially lower the base RTT estimate.
+**The NACK update flag:** NACKs (trimmed packets) carry RTT information too, since the receiver stamps them with arrival time. By default, NSCC uses NACK RTTs to refine base RTT. The `-disable_base_rtt_update_on_nack` flag turns this off, which can be useful in two scenarios: (1) trimmed packets are **smaller** than full data packets, so they experience less serialization delay at each hop — this can yield artificially low RTT samples that shrink the base RTT estimate below the true propagation delay for full-size packets; (2) trimmed packets may follow unusual forwarding paths (e.g., fast-path trim processing in some switch ASICs) that don't represent normal data-packet latency.
 
 #### What Base RTT Drives
 
@@ -714,6 +917,8 @@ delay = raw_rtt - _base_rtt;
 ```
 
 This `delay` value — the estimated queuing delay — is what flows into the four-quadrant decision matrix. It represents how much *extra* time this packet spent sitting in switch queues beyond the irreducible propagation delay.
+
+> *Note: because `base_rtt` is conservative (or per-flow paths differ), `qdelay` can occasionally go negative. The code clamps or uses fallback logic in these cases (`uec.cpp:975-976`) — this is expected, not a bug. When `raw_rtt < base_rtt`, the code falls back to the smoothed `avg_delay` instead of using the impossible negative value.*
 
 ### Target Delay: The Decision Boundary
 
@@ -793,6 +998,7 @@ Target delay doesn't just split the quadrant matrix — it propagates into the a
     ├──→ Multiplicative decrease trigger:
     │      Only cut if avg_delay > target_Qdelay                   (uec.cpp:1252)
     │      Cut magnitude: cwnd *= max(1 - γ×(avg-target)/avg, 0.5) (uec.cpp:1255)
+    │      (avg_delay: the slow EWMA filter output — see §4)
     │
     ├──→ QA threshold = 4 × target_Qdelay                         (uec.cpp:120)
     │      Quick Adapt fires when delay exceeds this extreme threshold
@@ -893,7 +1099,7 @@ NSCC uses `_delay_alpha = 0.0125` — that's 1/80. This is an extremely slow fil
 
 With 16 paths and per-packet spraying, any single delay sample might come from the *one* congested path out of 16. A fast filter (α=0.125) would react to this single sample, pushing the average up and potentially triggering a decrease — even though 15/16 paths are fine. A few ACKs later, the average drops back down, triggering an increase. The result: wild oscillation between decrease and increase on every few ACKs.
 
-The slow filter (α=0.0125) only moves meaningfully when *sustained* congestion shifts the overall average. It takes ~80 samples (roughly 5 fulfill adjustment periods at 8 MTUs each) for the filter to reach 63% of a new steady-state value. This means transient per-path congestion is smoothed out, and only persistent network-wide congestion drives the average up.
+The slow filter (α=0.0125) only moves meaningfully when *sustained* congestion shifts the overall average. It takes ~80 EWMA updates (ACK events) for the filter to reach 63% of a new steady-state value — typically several RTTs worth of feedback at the reference network's ACK cadence. This means transient per-path congestion is smoothed out, and only persistent network-wide congestion drives the average up.
 
 ### Two Delays, Two Jobs
 
@@ -915,6 +1121,8 @@ The **quadrant selection** (step 4) uses the **raw per-packet** queuing delay �
 This split is intentional. You want to *enter* the decrease quadrant quickly — if this specific packet saw ECN + high delay, that's a real signal worth acting on immediately. But you want the *magnitude* of the cut to reflect sustained conditions, not one unlucky sample. A single packet that bounced off a transiently full queue might have 3× target delay, but if the filtered average is only 1.2× target, the actual cut will be gentle.
 
 The result is a **fast trigger + slow actuator** pattern: the system is responsive to emerging congestion (entering multiplicative decrease within one ACK) but resistant to overreaction (the cut size is damped by the slow EWMA filter). This is arguably the single most important architectural insight for understanding how NSCC avoids oscillation while staying responsive.
+
+*This is the full answer to the §2 oscillation problem: the quadrant decision uses raw delay (reactive to this packet), but the decrease magnitude uses the slow EWMA (resistant to per-path noise). If we used the slow average for quadrant decisions, we'd be sluggish entering decrease. If we used raw delay for decrease magnitude, we'd overreact to single bad-path samples — exactly the yo-yo behavior from the 8-sample trace. The split gives us both speed and stability.*
 
 ### EWMA Filter with Three Special Cases
 
@@ -950,11 +1158,13 @@ Why treat these cases differently? It comes down to how much we *trust* each sam
 
 **Why the asymmetry in Case 1:** When we see high delay *without* ECN, the sample is discounted to `base_rtt * 0.25` instead of the actual delay. This prevents non-ECN high-delay samples (which may be from a single congested path in a multi-path fabric) from inflating the average that drives multiplicative decrease. The filter trusts ECN-marked delay more than unmarked delay.
 
+> *Why 0.25 specifically? It's a heuristic trust bias: using the full delay would let one-hot-path samples inflate the EWMA that drives global decrease; using zero would ignore potentially useful signal. `0.25 × base_rtt` gives the EWMA a small nudge (acknowledging *something* happened) without trusting the sample at face value. The exact value is empirical — a tuning choice, not a derived constant.*
+
 **Why Case 2 overrides Case 1:** If the delay is extreme (more than 5× the base RTT), something is seriously wrong regardless of ECN status — possibly a failing link or major routing change. The filter uses the actual delay to respond quickly to genuine emergencies.
 
-### The Retransmission Ambiguity Problem
+### The Retransmission Ambiguity Problem (Karn/Partridge)
 
-There's a subtle trap hiding in the RTT measurement path that can silently corrupt delay samples. Consider what happens when a packet is retransmitted:
+There's a subtle trap hiding in the RTT measurement path that can silently corrupt delay samples — this is the classic **Karn/Partridge problem** in RTT estimation: you can't tell which transmission attempt an ACK is responding to. Consider what happens when a packet is retransmitted:
 
 ```
   t=0µs    Send packet #42 (first attempt)
@@ -1012,11 +1222,11 @@ Multiplicative decrease cuts at most 50% per RTT. In a 64-flow incast, the fair 
   "Without QA: 5-10 RTTs to converge    With QA: 1 RTT to converge"
 ```
 
-Quick Adapt doesn't *decrease* the window — it **resets** it to what was actually achieved in the last measurement period. This is fundamentally faster than iterative multiplicative decrease.
+Quick Adapt doesn't *decrease* the window — it **resets** it to what was actually achieved in the last measurement period. This is fundamentally faster than iterative multiplicative decrease. In effect, QA performs a **measurement-based reset**: `cwnd ← delivered_bytes_in_window` — it sets the window to what the network actually sustained, rather than iteratively searching for it.
 
 ### Mechanism (`uec.cpp:1145-1200`)
 
-Quick Adapt operates on a periodic window of `_base_rtt + _target_Qdelay`:
+Quick Adapt operates on a periodic window of `_base_rtt + _target_Qdelay`. *Why `base_rtt + target_Qdelay` and not just one RTT? The window must be long enough to capture a full feedback cycle: `base_rtt` covers the propagation round-trip, and `target_Qdelay` accounts for the maximum acceptable queuing. Together they span the full expected delay under normal (non-emergency) operation — any measurement over this window reflects the network's sustainable throughput.*
 
 ```
 Every (base_rtt + target_Qdelay) interval:
@@ -1078,7 +1288,7 @@ The figure below shows completion rate and p99 FCT under 32-to-1 incast for diff
 
 ## 6. Packet Spraying & Load Balancing
 
-NSCC operates natively with per-packet spraying. The multipath engine (`uec_mp.h`) selects an entropy value for each packet that determines its physical path through the fabric.
+NSCC operates natively with per-packet spraying. The multipath engine (`uec_mp.h`) selects an **entropy** value for each packet that determines its physical path through the fabric ("entropy" here is the per-packet hash input that selects among ECMP paths — think of it as a path-id).
 
 ### How Path Selection Works: The Bitmap Example
 
@@ -1113,6 +1323,8 @@ Paths with penalties are skipped during selection. Penalties decay over time, so
 
 ### Feedback Integration
 
+> **NOOP + path coupling in one sentence:** If ECN + low delay → do not reduce cwnd; instead, penalize the path-id (entropy) that produced the mark (lower its score in the bitmap/REPS structure).
+
 On every ACK/NACK, the multipath engine receives feedback (`uec.cpp:1038`):
 
 ```cpp
@@ -1123,10 +1335,9 @@ But NACK processing is more nuanced — it distinguishes **where** the trim happ
 
 ```
   Receiver computes: is_last_hop = (pkt.nexthop() - pkt.trim_hop() - 2) == 0
-                                                                    ↑
-                                              htsim uses 2 elements per hop
-                                              (queue + pipe), hence the "-2"
 ```
+
+> *Implementation detail: htsim uses 2 elements per hop (queue + pipe), hence the `- 2` in the formula above. This is simulator-specific; a real implementation would use its own hop-counting mechanism.*
 
 This gives the sender a crucial piece of information: *was the packet trimmed in the fabric, or at the receiver's last-hop link?*
 
@@ -1199,7 +1410,7 @@ The deepest insight in NSCC's multipath integration is the **ordering of respons
 
 **Net effect:** for ECMP collisions (Steps 1–4), the flow maintained its sending rate *and* avoided the congested path — zero throughput lost. For global congestion (Step 5), the system falls through to CC-level rate reduction. The ordering means you never cut your window for a problem that path steering can solve.
 
-**Wait to Decrease (WTD).** SMaRTT-REPS [SMaRTT-REPS] formalizes this ordering with a mechanism called WTD: upon receiving ECN + low delay, the sender *defers* any CC-level decrease for a brief window (approximately one RTT), giving the load balancer time to reroute. WTD is **not** "ignore ECN" — it's "defer the cwnd reaction long enough for LB to try, then fall back to CC if marks persist." The implementation in this simulator achieves the same effect via the pure NOOP quadrant: since NOOP makes no window change, the load balancer has a full fulfill period (~1 RTT) to resolve the issue before the next batch of ACKs could shift the quadrant decision.
+**Wait to Decrease (WTD).** SMaRTT-REPS [SMaRTT-REPS] formalizes this ordering with a mechanism called WTD: upon receiving ECN + low delay, the sender *defers* any CC-level decrease. The SMaRTT paper describes WTD more precisely as not reacting immediately to early/mild ECN to allow the LB interplay — the *typical timescale* of this deferral is on the order of one RTT, but WTD is not defined as a fixed "one RTT timer." The core principle: WTD is **not** "ignore ECN" — it's "defer the cwnd reaction long enough for LB to try, then fall back to CC if marks persist." The implementation in this simulator achieves the same effect via the pure NOOP quadrant: since NOOP makes no window change, the load balancer has a full fulfill period (~1 RTT) to resolve the issue before the next batch of ACKs could shift the quadrant decision.
 
 **The "early global congestion" corner case.** ECN + low delay can *also* be the very beginning of global congestion — queues are just starting to build everywhere, delay hasn't caught up yet. WTD's "defer" framing handles this naturally: if marks persist after the LB has tried rerouting, delay will rise (because every path is now congested), and the flow transitions from Q3 (NOOP) to Q2 (multiplicative decrease). The deferral costs at most one RTT of reaction time — a small price for avoiding unnecessary window cuts on the far more common ECMP collision case.
 
@@ -1284,11 +1495,11 @@ scaling_factor_a = network_bdp / reference_bdp    // BDP ratio
 scaling_factor_b = target_Qdelay / reference_rtt  // delay ratio
 ```
 
-For a 400 Gbps, 12µs RTT network: `scaling_factor_a = 4.0`, `scaling_factor_b = 0.5` (with default target = 0.75 * RTT with trimming).
+For a 400 Gbps, 12µs RTT network: `scaling_factor_a = 4.0`, `scaling_factor_b = 0.75` (since target = 0.75 × 12µs = 9µs, and b = 9/12 = 0.75).
 
 ### Concrete Numbers Across Network Speeds
 
-Here are the actual computed parameter values for three representative networks (assuming MSS = 4KB = 4096 bytes, trimming enabled so target = 0.75 × RTT):
+Here are illustrative parameter values for three representative networks (trimming enabled, target = 0.75 × RTT). All values below use **MSS = 4096 bytes** (the simulator default). If your MTU configuration yields a different effective MSS, scale alpha/fi/eta proportionally — the *ratios* between columns are what matter for understanding scaling, not the absolute numbers.
 
 ```
                      100G/12µs    400G/12µs    800G/6µs
@@ -1299,7 +1510,7 @@ Here are the actual computed parameter values for three representative networks 
   target_Qdelay      9µs          9µs          4.5µs
   scale_a            1.0          4.0          4.0
   scale_b            0.75         0.75         0.375
-  alpha              2731/µs      10923/µs     14564/µs
+  alpha              2731/µs      10923/µs     10923/µs
   fi                 20KB         80KB         80KB
   eta                614B         2458B        2458B
   fi_scale           0.25         1.0          1.0
@@ -1307,7 +1518,9 @@ Here are the actual computed parameter values for three representative networks 
   delay_alpha        0.0125       0.0125       0.0125
 ```
 
-Notice the pattern: `scale_a` captures the BDP ratio (800G/6µs has the same BDP as 400G/12µs, so both get `scale_a=4`). `scale_b` captures the delay ratio. Parameters that need to scale with *capacity* (fi, eta, fi_scale) use `scale_a`. Parameters that need to scale with *both* capacity and delay sensitivity (alpha) use both.
+Notice the pattern: `scale_a` captures the BDP ratio (800G/6µs has the same BDP as 400G/12µs, so both get `scale_a=4`). `scale_b` captures the delay ratio. Parameters that need to scale with *capacity* (fi, eta, fi_scale) use `scale_a`. And here's a key insight:
+
+> **Surprising result: alpha is independent of `target_Qdelay`.** Despite alpha's formula containing `1/target_Qdelay`, the product `alpha × (target − delay)` is actually independent of `target_Qdelay` at a given headroom fraction. The target appears in both numerator (via `scaling_factor_b`) and denominator and cancels. This means changing `target_Qdelay` shifts *where* the equilibrium sits but not *how fast* the algorithm converges to it. That's why the 400G/12µs and 800G/6µs columns show the same alpha — they have the same BDP, so the same `scale_a`.
 
 The key invariant: **at any network speed, the algorithm takes roughly the same number of RTTs to fill the pipe and the same number of RTTs to converge to fairness.**
 
@@ -1622,7 +1835,7 @@ A clean way to compare congestion-control algorithms is the triple: **Knob** (wh
 | **Increase** | Proportional to (target - delay) | Cubic function of time | Timer + byte-counter recovery |
 | **Decrease** | Proportional: `γ*(delay-target)/delay` | Multiplicative: `β=0.7` | Alpha-proportional: `RC*(1-α/2)` |
 | **Pacing** | NIC-limited (no software pacing) | No (ACK-clocked) | Hardware rate limiter |
-| **Retransmission** | SLEEK probe-based | 3 DupACK + RTO | Go-back-N + RTO |
+| **Retransmission** | SLEEK probe-based | 3 DupACK + RTO | Go-back-N + RTO (simulator model; real RDMA deployments may differ) |
 | **Multi-path** | Native (per-packet spraying) | Single-path | Single-path |
 | **Fairness** | High (Jain's FI ≈ 1.000) | Good (FI ≈ 0.976-0.997) | Adaptive (alpha-driven) |
 
@@ -1652,9 +1865,9 @@ These shapes are a direct consequence of signal type: TCP Cubic sees **binary** 
 
 To understand why NSCC combines *both* delay and ECN, it helps to see what happens when you use only one:
 
-**DCTCP** [DCTCP] (ECN-only, window-based): Adjusts cwnd based on the *fraction* of marked packets in a window. If 30% of ACKs carry ECN, cut by ~30%. This is elegant — it extracts multi-bit information from a 1-bit signal via statistical aggregation. But DCTCP has no delay signal, so it can't distinguish "one path is hot" from "all paths are moderately loaded." In a spraying fabric, it would over-react to per-path collisions.
+**DCTCP** [DCTCP] (ECN-only, window-based): Adjusts cwnd based on the *fraction* of marked packets in a window. If ~30% of packets are marked (α≈0.3), DCTCP reduces cwnd by α/2 ≈ 15% — not 30%, because the canonical update is `cwnd ← cwnd × (1 − α/2)`. This is elegant — it extracts multi-bit information from a 1-bit signal via statistical aggregation. But DCTCP has no delay signal, so it can't distinguish "one path is hot" from "all paths are moderately loaded." In a spraying fabric, it would over-react to per-path collisions.
 
-**Swift** [Swift] (delay-targeting, datacenter): Targets end-to-end delay as the primary congestion signal, adjusting the window to hold delay near a target. This gives rich magnitude information, but delay is a trailing indicator — Swift can be slow to react to sudden congestion because it has to wait for RTT measurements to reflect queue build-up.
+**Swift** [Swift] (delay-targeting, datacenter): Primarily a **delay-targeting rate control** — it adjusts sending rate to hold end-to-end delay near a target, using pacing under extreme congestion and optionally a window at high flow rates for efficiency (a hybrid approach). This gives rich magnitude information, but delay is a trailing indicator — Swift can be slow to react to sudden congestion because it has to wait for RTT measurements to reflect queue build-up.
 
 An earlier delay-targeting datacenter protocol, **TIMELY** [TIMELY], pioneered the use of RTT gradients as a congestion signal; Swift refines the approach with fabric-level delay targeting and NIC-hardware timestamps.
 
@@ -1799,6 +2012,13 @@ The figures below show bandwidth share and Jain's Fairness Index across three tr
 
 ![Traffic Pattern Comparison](figures/sim_traffic_pattern.png)
 
+### 9.9 Key Takeaways
+
+> **What to remember from §9:**
+> - **Cubic**: Loss-driven probing, time-based recovery, designed for WAN — probes aggressively until a hard signal (loss) forces it back. Mismatch for shallow-buffered DC fabrics.
+> - **DCQCN**: Rate-based control, timer-driven, assumes lossless fabric (PFC) — adjusts on fixed 55µs intervals regardless of congestion severity. Native to RDMA deployments.
+> - **NSCC**: Dual-signal classification + proportionality + multipath coupling, designed for spraying DC fabrics — responds smoothly and proportionally on two dimensions (delay magnitude + ECN binary), with native path-steering integration.
+
 ---
 
 ## 10. Intuition Summary
@@ -1838,7 +2058,7 @@ To tie all the sections together, let's trace a single ACK through the entire sy
   7. [§6] Multipath engine receives PATH_GOOD feedback → path score unchanged.
 ```
 
-Total time: nanoseconds. One ACK, seven subsystems, one coherent response. The dual-delay architecture (§4) ensures the quadrant was chosen by this packet's experience while any decrease magnitude would reflect the filtered history. The fulfill batching (§3) ensures the increase was normalized for fairness. The multipath feedback (§6) ensures the path selection adapts independently. Every section in this document describes one stage of this pipeline.
+Compute time per ACK is nanoseconds; the control-loop timescale is RTT-scale (~12µs at the reference network). One ACK, seven subsystems, one coherent response. The dual-delay architecture (§4) ensures the quadrant was chosen by this packet's experience while any decrease magnitude would reflect the filtered history. The fulfill batching (§3) ensures the increase was normalized for fairness. The multipath feedback (§6) ensures the path selection adapts independently. Every section in this document describes one stage of this pipeline.
 
 ### When Does NSCC Shine?
 
