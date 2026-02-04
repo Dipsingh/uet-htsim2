@@ -58,30 +58,89 @@ Plus: if delay is extreme → **Quick Adapt** emergency reset.
 
 **(D) Four timescales (nested):**
 
+To see how these timescales interlock, let's pin down concrete numbers for a reference setup:
+
+| Parameter | Value | Derivation |
+|-----------|-------|------------|
+| Link speed | 100 Gbps | |
+| MTU | 4 KB (4096 bytes) | Simulator default |
+| Packet serialization | 0.33 µs | 4096 × 8 bits / 100 Gbps |
+| ACK batching | ~16 KB (4 packets) | Receiver batches ACKs |
+| ACK inter-arrival | **~1.3 µs** | 4 × 0.33 µs at line rate |
+| `base_rtt` | 12 µs | Topology-derived |
+| `target_Qdelay` | 18 µs | 1.5 × base_rtt |
+| QA window | **30 µs** | base_rtt + target_Qdelay |
+
+**How many events happen inside one 30 µs QA window?** At 100 Gbps full throughput:
+
+| Counter | Calculation | Result |
+|---------|-------------|--------|
+| Bytes delivered | 12.5 GB/s × 30 µs | ~375 KB |
+| Packets | 375 KB / 4 KB | ~94 packets |
+| ACK events | 375 KB / 16 KB | **~23 ACKs** |
+| Fulfill triggers | 375 KB / 32 KB | **~12 fulfills** |
+| QA checks | 1 per window | **1** |
+
+So the "clock hierarchy" inside one QA window is: **~23 quadrant decisions → ~23 EWMA updates → ~12 fulfill applications → 1 QA check**.
+
 ```
   time →
-  ├─ ACK ─┤                                          ← per-ACK (~0.15µs between ACKs)
+  ├─ ACK ─┤                                          ← per-ACK (~1.3 µs at line rate)
   │        │                                            raw qdelay → quadrant direction
   │        │                                            ECN flag   → quadrant direction
+  │        │                                            EWMA update (slow filter)
   │        │
-  ├──── fulfill period ────┤                          ← ~8 MTUs or ~1 RTT (~12µs)
+  ├──── fulfill period ────┤                          ← 32 KB or ~1 RTT (~12 µs)
   │  (accumulate _inc_bytes │                            cwnd += _inc_bytes / cwnd
-  │   from many ACKs)       │                            + eta (liveness floor)
+  │   from ~9 ACKs)         │                            + eta (liveness floor)
   │                         │
-  ├────────── EWMA time constant ──────────────────┤  ← ~80 ACK-events (several RTTs)
+  ├────────── EWMA time constant ──────────────────┤  ← ~80 ACK-events (~2-3 RTTs)
   │  (α=0.0125 filter absorbs per-path noise)      │    avg_delay → decrease magnitude
+  │                                                 │    (does NOT choose quadrant)
   │                                                 │
-  ├────────────── QA window ───────────────────────┤  ← base_rtt + target_Qdelay (~21µs)
+  ├────────────── QA window ───────────────────────┤  ← base_rtt + target_Qdelay (~30 µs)
   │  (measure achieved_bytes over one full          │    if achieved < maxwnd/8
   │   feedback cycle; reset if severely stalled)    │    → emergency cwnd reset
   └─────────────────────────────────────────────────┘
 
   Shortest ◄──────────────────────────────────► Longest
   per-ACK     fulfill        EWMA            QA window
-  (~0.15µs)   (~12µs)        (~several RTTs)  (~21µs per check)
+  (~1.3 µs)   (~12 µs)       (~2-3 RTTs)     (~30 µs per check)
 ```
 
-Each inner timescale feeds the next: per-ACK samples drive the EWMA and accumulate into `_inc_bytes`; the fulfill period applies the accumulated increase; the QA window checks whether the whole system is working. The key insight is that the **quadrant decision** (fastest) and the **decrease magnitude** (slowest filter) deliberately operate at different speeds — fast trigger, slow actuator.
+**Dataflow: what feeds what.** Here is the wiring diagram for one ACK event:
+
+```
+ACK arrives
+  │
+  ├─► raw_rtt ──┬─► base_rtt update (min-tracking)
+  │             │
+  │             └─► qdelay = raw_rtt − base_rtt ──┬─► Quadrant choice (D bit)
+  │                                               │
+  │                                               └─► EWMA update ──► avg_delay
+  │                                                                      │
+  │                                                     (feeds decrease magnitude,
+  │                                                      NOT quadrant choice)
+  │
+  ├─► ecn flag ──┬─► Quadrant choice (M bit) ──► action:
+  │              │                                ├─ (D=0,M=0) → accumulate proportional increase
+  │              │                                ├─ (D=1,M=0) → accumulate fair increase
+  │              │                                ├─ (D=1,M=1) → immediate decrease (uses avg_delay)
+  │              │                                └─ (D=0,M=1) → NOOP (no cwnd change)
+  │              │
+  │              └─► Load balancer feedback (path penalties)
+  │
+  ├─► acked_bytes ──► _received_bytes ──► fulfill trigger (every 32 KB)
+  │                                            │
+  │                                            └─► cwnd += _inc_bytes/cwnd + η
+  │                                                 (then reset _inc_bytes, _received_bytes)
+  │
+  └─► acked_bytes ──► _achieved_bytes ──► QA check (every 30 µs)
+                                               │
+                                               └─► if achieved < threshold: cwnd reset
+```
+
+**The key insight:** raw `qdelay` + `ecn` choose the **mode** (which quadrant); EWMA `avg_delay` sets the **brake strength** (how hard to cut); `_inc_bytes` + fulfill sets **growth** (batched increases); `achieved_bytes` + QA provides **emergency reset** (when iterative control is too slow).
 
 ---
 
@@ -97,6 +156,11 @@ Each inner timescale feeds the next: per-ACK samples drive the EWMA and accumula
 | `network_rtt` | µs | Topology-derived RTT baseline (diameter-spanning worst case) |
 | `BDP` | bytes | Bandwidth-Delay Product: `base_rtt × linkspeed / 8` |
 | `MSS` / `MTU` | bytes | Packet payload size — **4 KB (4096 bytes) in this simulator** (not the usual 1500 B) |
+| `cwnd` | bytes | Congestion window — the controlled variable (total in-flight bytes) |
+| `_inc_bytes` | bytes² | Accumulator for increase credits; becomes bytes after `÷ cwnd` normalization |
+| `_received_bytes` | bytes | Counter since last fulfill; triggers at 32 KB |
+| `_achieved_bytes` | bytes | Counter since last QA check; measures actual throughput |
+| `η` (eta) | bytes | Liveness floor added at each fulfill (keeps tiny flows alive) |
 
 ---
 
