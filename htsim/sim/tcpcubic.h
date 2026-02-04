@@ -26,6 +26,10 @@ public:
     void setTcpFriendlinessEnabled(bool enabled) { _tcp_friendliness = enabled; }
     void setFastConvergenceEnabled(bool enabled) { _fast_convergence = enabled; }
 
+protected:
+    // Reset CUBIC + HyStart state for reuse (e.g., transfer mode)
+    void bictcp_hystart_reset();
+
 private:
     // CUBIC state (matching Linux kernel)
     uint32_t _last_max_cwnd;      // W_max: window at last loss (in bytes)
@@ -78,7 +82,6 @@ private:
     void hystart_update(simtime_picosec rtt);
     void hystart_reset();
     void bictcp_reset();
-    void bictcp_hystart_reset();
 };
 
 #endif // TCPCUBIC_H

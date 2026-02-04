@@ -143,6 +143,9 @@ void TcpCubicSrc::bictcp_hystart_reset()
     bictcp_reset();
     hystart_reset();
     _found_slow_start_exit = false;
+    _end_seq = 0;
+    _delay_min_sample = 0;
+    _delay_min = 0;
 }
 
 /*
@@ -158,8 +161,6 @@ void TcpCubicSrc::tcp_friendliness_update(uint32_t cwnd)
     // Every ack_cnt acks, we should have increased by one mss in Reno
     // ack_cnt is reset when cwnd increases
 
-    uint32_t delta;
-
     // tcp_cwnd in MSS units for easier calculation
     uint32_t cwnd_mss = cwnd / _mss;
     uint32_t tcp_cwnd_mss = _tcp_cwnd / _mss;
@@ -167,8 +168,6 @@ void TcpCubicSrc::tcp_friendliness_update(uint32_t cwnd)
     // Calculate how much Reno would have grown
     // Reno: cwnd += mss for every cwnd/mss acks
     // So for _ack_cnt acks: increase = _ack_cnt * mss / cwnd ≈ _ack_cnt / cwnd_mss
-
-    delta = (cwnd_mss * BICTCP_BETA_SCALE) / (3 * (BICTCP_BETA_SCALE - BETA));
 
     // If we're below Reno's cwnd, use Reno's increase
     if (tcp_cwnd_mss <= cwnd_mss) {
@@ -179,7 +178,7 @@ void TcpCubicSrc::tcp_friendliness_update(uint32_t cwnd)
 
     if (tcp_cwnd_mss > cwnd_mss) {
         // TCP-friendly region: use Reno's increment
-        uint32_t max_cnt = cwnd / (tcp_cwnd_mss - cwnd_mss);
+        uint32_t max_cnt = cwnd_mss / (tcp_cwnd_mss - cwnd_mss);
         if (_cnt > max_cnt)
             _cnt = max_cnt;
     }
@@ -269,7 +268,7 @@ void TcpCubicSrc::bictcp_update(uint32_t cwnd, uint32_t acked)
     if (bic_target > cwnd) {
         // Calculate cnt = cwnd / (bic_target - cwnd)
         // This is how many acks before we increase cwnd
-        _cnt = cwnd / (bic_target - cwnd);
+        _cnt = max<uint32_t>(1, cwnd / (bic_target - cwnd));
     } else {
         // In concave region close to W_max, be more aggressive
         // Use smaller cnt for faster convergence
@@ -371,7 +370,7 @@ void TcpCubicSrc::inflate_window()
 
     // Increase cwnd when we've received enough acks
     // cnt is the number of acks before incrementing cwnd by mss
-    if (_ack_cnt > _cnt) {
+    if (_ack_cnt >= _cnt) {
         _cwnd += _mss;
         _ack_cnt = 0;
     }

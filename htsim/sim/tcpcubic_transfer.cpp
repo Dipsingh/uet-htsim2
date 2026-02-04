@@ -22,6 +22,7 @@ TcpCubicSrcTransfer::TcpCubicSrcTransfer(TcpLogger* logger, TrafficLogger* pktLo
 }
 
 void TcpCubicSrcTransfer::reset(uint64_t bb, int shouldRestart) {
+    bictcp_hystart_reset();
     _sawtooth = 0;
     _rtt_avg = timeFromMs(0);
     _rtt_cum = timeFromMs(0);
