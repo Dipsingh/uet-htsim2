@@ -1,0 +1,78 @@
+topology file: htsim/sim/datacenter/topologies/leaf_spine_128_1to1.topo
+traffic matrix file: htsim/sim/datacenter/connection_matrices/incast_2to1_steady.cm
+queue size 100 packets
+end_time 200000 us
+random seed 13
+DCQCN ratio 0.5
+TCP Cubic initial cwnd 10 packets
+TCP Cubic HyStart enabled
+TCP Cubic fast convergence enabled
+ECN enabled
+TCP Cubic ECN response enabled
+CSV output: htsim/sim/datacenter/results/review_ecn/dcqcn_steady_tcpEcnOn.csv
+Logging to htsim/sim/datacenter/results/review_ecn/dcqcn_steady_tcpEcnOn.dat
+RoceSinkLoggerSampling(p=0.00025 init 
+Loading connection matrix from htsim/sim/datacenter/connection_matrices/incast_2to1_steady.cm
+Nodes: 128 Connections: 2 Triggers: 0 Failures: 0
+Using 128 nodes
+Topology load done
+Fat Tree topology (0) with 1us Src-ToR links, 1us ToR-Agg links, 0us ToR switch latency, 0us Agg switch latency for 4us diameter latency.
+no_of_tor_uplinks: 128
+No of nodes: 128
+No of pods: 1
+Hosts per pod: 128
+Hosts per pod: 128
+ToR switches per pod: 8
+Agg switches per pod: 16
+No of core switches: 0
+FatTreeCfg constructor done.
+Tier 0 QueueSize Down 150000 bytes
+Tier 0 QueueSize Up 150000 bytes
+Tier 1 QueueSize Down 150000 bytes
+Tier 1 QueueSize Up 150000 bytes
+Tier 2 QueueSize Down 150000 bytes
+ECN thresholds: low=37500 bytes, high=145500 bytes
+FatTreeTopologyCfg NCORE=0 NAGG=16 NTOR=8 NSRV=128 NPOD=1 tor_switches_per_pod=8 agg_switches_per_pod=16 tiers=2 host_per_pod=128 enabled_ecn=1 enable_ecn_on_tor_downlink=1 ecn_low=37500 ecn_high=145500 num_failed_links=0 failed_link_ratio=0.25 no_of_nodes=128 hop_latency=0 switch_latency=0 diameter_latency=4000000 diameter=4 tier=0 link_latency=1000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=16 queue_down=150000 radix_up=16 queue_up=150000 tier=1 link_latency=1000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=8 queue_down=150000 radix_up=0 queue_up=150000
+queue_id 2 ecn_low 37500 ecn_high 145500
+actual nodes 128
+Creating 1 DCQCN flows and 1 TCP Cubic flows
+pathcount 16
+Created 1 DCQCN flows and 1 TCP Cubic flows
+Both protocols share the SAME network queues - they will compete for bandwidth
+Starting simulation
+startflow dcqcn_64_0 at 0
+Done at 200000 us
+CSV results written to htsim/sim/datacenter/results/review_ecn/dcqcn_steady_tcpEcnOn.csv
+
+========================================
+INTER-PROTOCOL FAIRNESS RESULTS
+========================================
+
+=== DCQCN Statistics ===
+DCQCN flows completed: 0/1
+DCQCN total bytes received: 556357500
+DCQCN retransmits: 0
+DCQCN per-flow throughput (Gbps): mean=22.2543 median=22.2543 p99=22.2543
+
+=== TCP Cubic Statistics ===
+TCP Cubic flows completed: 0/1
+TCP Cubic total bytes received: 1919227501
+TCP Cubic retransmits: 2
+TCP Cubic per-flow throughput (Gbps): mean=76.7691 median=76.7691 p99=76.7691
+
+=== Competitive Fairness Analysis ===
+Mode: STEADY-STATE (all flows active for entire simulation)
+Measurement window: 0 - 200000 us (200000 us)
+DCQCN: 556357500 bytes, 22.2543 Gbps, share=22.4738%
+Cubic: 1919227501 bytes, 76.7691 Gbps, share=77.5262%
+Competitive JFI: 0.767414
+
+=== Raw Bandwidth Share (total bytes, for reference) ===
+DCQCN: 22.4738%
+Cubic: 77.5262%
+
+=== Jain's Fairness Index (per-flow) ===
+Jain's Fairness Index (all flows): 0.767414
+
+=== DCQCN Protocol Details ===
+  rocesrc 0 CNPs=1116 new_pkts=0 rtx_pkts=0

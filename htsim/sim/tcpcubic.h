@@ -25,6 +25,7 @@ public:
     void setHystartEnabled(bool enabled) { _hystart_enabled = enabled; }
     void setTcpFriendlinessEnabled(bool enabled) { _tcp_friendliness = enabled; }
     void setFastConvergenceEnabled(bool enabled) { _fast_convergence = enabled; }
+    void setEcnEnabled(bool enabled) { _ecn_enabled = enabled; }
 
 protected:
     // Reset CUBIC + HyStart state for reuse (e.g., transfer mode)
@@ -56,6 +57,10 @@ private:
     // Feature flags
     bool _tcp_friendliness;
     bool _fast_convergence;
+    bool _ecn_enabled;
+
+    // ECN per-RTT guard: don't react until ACKs pass this seqno
+    uint64_t _ecn_next_seq;
 
     // Constants from Linux kernel (using default values)
     // BICTCP_BETA_SCALE = 1024, beta = 717 (0.7 * 1024)

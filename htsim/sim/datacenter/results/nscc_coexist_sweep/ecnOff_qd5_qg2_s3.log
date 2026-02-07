@@ -1,0 +1,89 @@
+topology file: htsim/sim/datacenter/topologies/leaf_spine_128_1to1.topo
+traffic matrix file: htsim/sim/datacenter/connection_matrices/incast_2to1_size500MB.cm
+queue size 100 packets
+end_time 200000 us
+random seed 3
+NSCC ratio 0.5
+NSCC target queue delay 5 us
+NSCC qa_gate 2
+NSCC path entropy 16
+TCP Cubic initial cwnd 10 packets
+TCP Cubic HyStart enabled
+TCP Cubic fast convergence enabled
+TCP Cubic ECN response disabled
+CSV output: htsim/sim/datacenter/results/nscc_coexist_sweep/ecnOff_qd5_qg2_s3.csv
+Logging to htsim/sim/datacenter/results/nscc_coexist_sweep/ecnOff_qd5_qg2_s3.dat
+Loading connection matrix from htsim/sim/datacenter/connection_matrices/incast_2to1_size500MB.cm
+Nodes: 128 Connections: 2 Triggers: 0 Failures: 0
+Using 128 nodes
+Topology load done
+Fat Tree topology (0) with 1us Src-ToR links, 1us ToR-Agg links, 0us ToR switch latency, 0us Agg switch latency for 4us diameter latency.
+no_of_tor_uplinks: 128
+No of nodes: 128
+No of pods: 1
+Hosts per pod: 128
+Hosts per pod: 128
+ToR switches per pod: 8
+Agg switches per pod: 16
+No of core switches: 0
+FatTreeCfg constructor done.
+Tier 0 QueueSize Down 150000 bytes
+Tier 0 QueueSize Up 150000 bytes
+Tier 1 QueueSize Down 150000 bytes
+Tier 1 QueueSize Up 150000 bytes
+Tier 2 QueueSize Down 150000 bytes
+FatTreeTopologyCfg NCORE=0 NAGG=16 NTOR=8 NSRV=128 NPOD=1 tor_switches_per_pod=8 agg_switches_per_pod=16 tiers=2 host_per_pod=128 enabled_ecn=0 enable_ecn_on_tor_downlink=0 ecn_low=0 ecn_high=0 num_failed_links=0 failed_link_ratio=0.25 no_of_nodes=128 hop_latency=0 switch_latency=0 diameter_latency=4000000 diameter=4 tier=0 link_latency=1000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=16 queue_down=150000 radix_up=16 queue_up=150000 tier=1 link_latency=1000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=8 queue_down=150000 radix_up=0 queue_up=150000
+actual nodes 128
+Network RTT: 8 us
+Initializing static NSCC parameters: _reference_network_linkspeed=100000000000 _reference_network_rtt=12000000 _reference_network_bdp=150000 _target_Qdelay=5000000 _network_linkspeed=100000000000 _network_rtt=8000000 _network_bdp=100000 _qa_gate=2^2 _qa_threshold=2e+07 _scaling_factor_a=0.666667 _scaling_factor_b=0.416667 _alpha=0.000910222 _fi=13653.3 _eta=409.6 _qa_scaling=1 _gamma=0.8 _fi_scale=0.166667 _delay_alpha=0.0125 _adjust_period_threshold=8000000 _adjust_bytes_threshold=33280
+Creating 1 NSCC flows and 1 TCP Cubic flows
+Initialize per-instance NSCC parameters: flowid 1000000001 _base_rtt=8000000 _base_bdp=100000 _bdp=100000 _min_cwnd=4160 _maxwnd=150000 _cwnd=150000
+pathcount 16
+Setting flow size to 524289500
+Created 1 NSCC flows and 1 TCP Cubic flows
+Both protocols share the SAME network queues - they will compete for bandwidth
+Starting simulation
+Flow nscc_64_0 flowId 1000000001 uecSrc 0 starting at 0
+653.384 flowid 1000000001 Spurious 693
+Flow nscc_64_0 flowId 1000000001 uecSrc 0 finished at 48734.2 total messages 1 total packets 365104 RTS 0 total bytes 524289344 in_flight now 0 fair_inc 3268303 prop_inc 6104734 fast_inc 188250 eta_inc 2365247 multi_dec -0 quick_dec -1443301 nack_dec -2089500
+Trigger 0 fired, 1 targets
+Done at 200000 us
+CSV results written to htsim/sim/datacenter/results/nscc_coexist_sweep/ecnOff_qd5_qg2_s3.csv
+
+========================================
+INTER-PROTOCOL FAIRNESS RESULTS
+========================================
+
+=== NSCC Statistics ===
+NSCC flows completed: 1/1
+NSCC total bytes received (unique): 524289344
+NSCC per-flow throughput (Gbps): mean=86.0651 median=86.0651 p99=86.0651
+
+=== TCP Cubic Statistics ===
+TCP Cubic flows completed: 0/1
+TCP Cubic total bytes received: 123941821
+TCP Cubic retransmits: 187
+TCP Cubic per-flow throughput (Gbps): mean=4.95768 median=4.95768 p99=4.95768
+
+=== Competitive Fairness Analysis ===
+Mode: PHASE ANALYSIS (at least one flow completed)
+Phase 1 (overlap): 0 - 48734.2 us (48734.2 us)
+Phase 2 (solo):    48734.2 - 48734.2 us (0 us)
+NSCC finished first. Cubic ran solo for 0 us
+Estimated Cubic solo bytes (Phase 2): 0
+
+Competitive throughput (Phase 1 only):
+  NSCC:  524289344 bytes, 86.0651 Gbps
+  Cubic: 123941821 bytes, 20.3458 Gbps
+
+Competitive bandwidth share:
+  NSCC:  80.88%
+  Cubic: 19.12%
+Competitive JFI: 0.723888
+
+=== Raw Bandwidth Share (total bytes, for reference) ===
+NSCC:  80.88%
+Cubic: 19.12%
+
+=== Jain's Fairness Index (per-flow) ===
+Jain's Fairness Index (all flows): 0.557413

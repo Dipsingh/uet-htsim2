@@ -108,13 +108,15 @@ void DCQCNSrc::increaseRate(){
 }
 
 void DCQCNSrc::doNextEvent(){
+    if (_done) return;
+
     bool reschedule = false;
 
     RoceSrc::doNextEvent();
 
     //cout << "Adding " << (_highest_sent - _old_highest_sent) << " to sent bytes " << _byte_counter << " " << _highest_sent << endl;
 
-    _byte_counter += (_highest_sent - _old_highest_sent);
+    _byte_counter += (_highest_sent - _old_highest_sent) * _mss;
     _old_highest_sent = _highest_sent;
 
     if (_byte_counter >= _B){

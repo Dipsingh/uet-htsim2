@@ -326,7 +326,7 @@ void RoceSrc::doNextEvent() {
         return;
     }
 
-    if (_flow_size && _highest_sent >= _flow_size) { 
+    if (_done || (_flow_size && _highest_sent * _mss >= _flow_size)) {
         if (_log_me) 
             cout << "Src " << get_id()  << " stopping send coz highest_sent is " << _highest_sent << endl;
         return;

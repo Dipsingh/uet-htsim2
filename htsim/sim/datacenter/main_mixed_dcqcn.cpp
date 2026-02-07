@@ -18,6 +18,7 @@
 #include <iostream>
 #include <fstream>
 #include <string.h>
+#include <climits>
 #include <math.h>
 #include <list>
 #include <vector>
@@ -109,7 +110,6 @@ void exit_error(char* progr) {
 }
 
 int main(int argc, char **argv) {
-    Clock c(timeFromSec(50 / 100.), eventlist);
     linkspeed_bps linkspeed = speedFromMbps((double)HOST_NIC);
     uint32_t no_of_conns = 0, no_of_nodes = DEFAULT_NODES;
     stringstream filename(ios_base::out);
@@ -129,6 +129,7 @@ int main(int argc, char **argv) {
     uint32_t cwnd_pkts = 10;
     bool hystart_enabled = true;
     bool fast_convergence = true;
+    bool tcp_ecn_enabled = true;
 
     char* tm_file = NULL;
     char* topo_file = NULL;
@@ -194,6 +195,10 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i], "-ecn")) {
             enable_ecn = true;
             cout << "ECN enabled" << endl;
+        } else if (!strcmp(argv[i], "-tcp_ecn")) {
+            tcp_ecn_enabled = atoi(argv[i+1]) != 0;
+            cout << "TCP Cubic ECN response " << (tcp_ecn_enabled ? "enabled" : "disabled") << endl;
+            i++;
         } else {
             cout << "Unknown parameter: " << argv[i] << endl;
             exit_error(argv[0]);
@@ -210,6 +215,7 @@ int main(int argc, char **argv) {
     RoceSink::ooo_enabled = true;
 
     eventlist.setEndtime(timeFromUs((uint32_t)end_time));
+    Clock c(timeFromSec(50 / 100.), eventlist);
 
     // Prepare loggers
     cout << "Logging to " << filename.str() << endl;
@@ -344,6 +350,8 @@ int main(int argc, char **argv) {
 
             if (crt->size > 0) {
                 roceSrc->set_flowsize(crt->size);
+            } else {
+                roceSrc->set_flowsize(UINT64_MAX / 2);  // effectively infinite
             }
 
             DCQCNSink* roceSnk = new DCQCNSink(eventlist);
@@ -402,6 +410,8 @@ int main(int argc, char **argv) {
 
             if (crt->size > 0) {
                 tcpSrc->set_flowsize(crt->size);
+            } else {
+                tcpSrc->set_flowsize(UINT64_MAX / 2);  // effectively infinite
             }
 
             tcpSrc->set_cwnd(cwnd_pkts * Packet::data_packet_size());
@@ -409,6 +419,7 @@ int main(int argc, char **argv) {
             tcpSrc->setHystartEnabled(hystart_enabled);
             tcpSrc->setFastConvergenceEnabled(fast_convergence);
             tcpSrc->setTcpFriendlinessEnabled(true);
+            tcpSrc->setEcnEnabled(tcp_ecn_enabled);
 
             tcpRtxScanner.registerTcp(*tcpSrc);
 
@@ -674,11 +685,7 @@ int main(int argc, char **argv) {
              << " us (" << (timeAsUs(phase2_end) - timeAsUs(overlap_end)) << " us)" << endl;
 
         if (overlap_us > 0 && dcqcn_count > 0 && cubic_count > 0) {
-            // Estimate Phase 2 bytes for the flow that was still running alone.
-            // The solo flow runs at approximately link_rate during Phase 2.
             double phase2_us = timeAsUs(phase2_end) - timeAsUs(overlap_end);
-            double link_rate_gbps = linkspeed / 1e9;
-            uint64_t phase2_solo_bytes = (uint64_t)(link_rate_gbps * 1e9 / 8.0 * phase2_us / 1e6);
 
             // Compute Phase 1 bytes per protocol using signed arithmetic to avoid underflow
             int64_t dcqcn_phase1_bytes = (int64_t)dcqcn_total_bytes;
@@ -694,14 +701,42 @@ int main(int argc, char **argv) {
                 }
             }
 
+            // Estimate Phase 2 solo bytes per-flow: each surviving-protocol flow
+            // contributes based on its own average rate and its active time in Phase 2.
+            // This handles multi-flow experiments with staggered starts correctly.
+            double phase2_start_us = timeAsUs(overlap_end);
+            double phase2_end_us = timeAsUs(phase2_end);
+
+            auto estimate_phase2_bytes = [&](const string& survivor_proto) -> uint64_t {
+                uint64_t total = 0;
+                for (auto& rec : flow_records) {
+                    if (rec.protocol != survivor_proto) continue;
+                    double flow_start_us = timeAsUs(rec.start_time);
+                    double flow_end_us = (rec.finish_time > 0)
+                        ? timeAsUs(rec.finish_time) : phase2_end_us;
+                    double flow_lifetime_us = flow_end_us - flow_start_us;
+                    if (flow_lifetime_us <= 0 || rec.bytes_received == 0) continue;
+                    // How much of Phase 2 was this flow active?
+                    double active_start = max(phase2_start_us, flow_start_us);
+                    double active_end = min(phase2_end_us, flow_end_us);
+                    double active_us = max(0.0, active_end - active_start);
+                    // Estimate using this flow's own average rate
+                    double flow_avg_bps = (double)rec.bytes_received * 8.0 / (flow_lifetime_us / 1e6);
+                    total += (uint64_t)(flow_avg_bps * active_us / 1e6 / 8.0);
+                }
+                return total;
+            };
+
             if (dcqcn_finished_first && !cubic_finished_first) {
-                // DCQCN finished first, Cubic ran solo in Phase 2
+                // DCQCN finished first, Cubic ran solo in Phase 2.
+                uint64_t phase2_solo_bytes = estimate_phase2_bytes("CUBIC");
                 cubic_phase1_bytes = (int64_t)cubic_total_bytes - (int64_t)phase2_solo_bytes;
                 if (cubic_phase1_bytes < 0) cubic_phase1_bytes = 0;
                 cout << "DCQCN finished first. Cubic ran solo for " << phase2_us << " us" << endl;
                 cout << "Estimated Cubic solo bytes (Phase 2): " << phase2_solo_bytes << endl;
             } else if (cubic_finished_first && !dcqcn_finished_first) {
-                // Cubic finished first, DCQCN ran solo in Phase 2
+                // Cubic finished first, DCQCN ran solo in Phase 2.
+                uint64_t phase2_solo_bytes = estimate_phase2_bytes("DCQCN");
                 dcqcn_phase1_bytes = (int64_t)dcqcn_total_bytes - (int64_t)phase2_solo_bytes;
                 if (dcqcn_phase1_bytes < 0) dcqcn_phase1_bytes = 0;
                 cout << "Cubic finished first. DCQCN ran solo for " << phase2_us << " us" << endl;

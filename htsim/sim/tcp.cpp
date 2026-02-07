@@ -184,8 +184,10 @@ TcpSrc::receivePacket(Packet& pkt)
         _rto = timeFromSec(.25);
 
     if (seqno >= _flow_size){
-        if (_finish_time == 0) _finish_time = eventlist().now();
-        cout << "Flow " << nodename() << " finished at " << timeAsMs(eventlist().now()) << endl;
+        if (_finish_time == 0) {
+            _finish_time = eventlist().now();
+            cout << "Flow " << nodename() << " finished at " << timeAsMs(eventlist().now()) << endl;
+        }
     }
   
     if (seqno > _last_acked) { // a brand new ack

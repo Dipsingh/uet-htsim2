@@ -65,6 +65,9 @@ TcpCubicSrc::TcpCubicSrc(TcpLogger* logger, TrafficLogger* pktlogger,
     // Feature flags (Linux defaults)
     _tcp_friendliness = true;
     _fast_convergence = true;
+    _ecn_enabled = true;
+
+    _ecn_next_seq = 0;
 }
 
 /*
@@ -146,6 +149,7 @@ void TcpCubicSrc::bictcp_hystart_reset()
     _end_seq = 0;
     _delay_min_sample = 0;
     _delay_min = 0;
+    _ecn_next_seq = 0;
 }
 
 /*
@@ -412,14 +416,14 @@ void TcpCubicSrc::deflate_window()
  */
 void TcpCubicSrc::receivePacket(Packet& pkt)
 {
-    // Check for ECN marking
-    if (pkt.flags() & ECN_ECHO) {
-        // ECN-triggered congestion event
-        // Only react once per RTT (check if we haven't already reacted)
-        if (_cwnd > _ssthresh) {
-            // Treat ECN like a loss event
+    // Check for ECN marking (only if ECN response is enabled)
+    if (_ecn_enabled && (pkt.flags() & ECN_ECHO)) {
+        TcpAck::seq_t ackno = ((TcpAck*)(&pkt))->ackno();
+        // Only react once per RTT window (like Linux kernel)
+        if (ackno > _ecn_next_seq && _cwnd > _ssthresh) {
             deflate_window();
             _cwnd = _ssthresh;
+            _ecn_next_seq = _highest_sent;
         }
     }
 

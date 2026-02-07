@@ -18,6 +18,7 @@
 #include <fstream>
 #include <string.h>
 #include <math.h>
+#include <climits>
 #include <list>
 #include <vector>
 #include <algorithm>
@@ -112,7 +113,6 @@ void exit_error(char* progr) {
 }
 
 int main(int argc, char **argv) {
-    Clock c(timeFromSec(50 / 100.), eventlist);
     linkspeed_bps linkspeed = speedFromMbps((double)HOST_NIC);
     uint32_t no_of_conns = 0, no_of_nodes = DEFAULT_NODES;
     stringstream filename(ios_base::out);
@@ -138,6 +138,7 @@ int main(int argc, char **argv) {
     uint32_t cwnd_pkts = 10;
     bool hystart_enabled = true;
     bool fast_convergence = true;
+    bool tcp_ecn_enabled = true;
 
     char* tm_file = NULL;
     char* topo_file = NULL;
@@ -220,6 +221,10 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i], "-ecn")) {
             enable_ecn = true;
             cout << "ECN enabled" << endl;
+        } else if (!strcmp(argv[i], "-tcp_ecn")) {
+            tcp_ecn_enabled = atoi(argv[i+1]) != 0;
+            cout << "TCP Cubic ECN response " << (tcp_ecn_enabled ? "enabled" : "disabled") << endl;
+            i++;
         } else {
             cout << "Unknown parameter: " << argv[i] << endl;
             exit_error(argv[0]);
@@ -231,6 +236,7 @@ int main(int argc, char **argv) {
     srandom(seed);
 
     eventlist.setEndtime(timeFromUs((uint32_t)end_time));
+    Clock c(timeFromSec(50 / 100.), eventlist);
 
     // Prepare loggers
     cout << "Logging to " << filename.str() << endl;
@@ -392,6 +398,8 @@ int main(int argc, char **argv) {
 
             if (crt->size > 0) {
                 uecSrc->setFlowsize(crt->size);
+            } else {
+                uecSrc->setFlowsize((uint64_t)1e15);  // ~1 PB: won't complete, stays in signed mem_b range
             }
 
             // Initialize NSCC congestion control
@@ -443,6 +451,8 @@ int main(int argc, char **argv) {
 
             if (crt->size > 0) {
                 tcpSrc->set_flowsize(crt->size);
+            } else {
+                tcpSrc->set_flowsize(UINT64_MAX / 2);  // effectively infinite
             }
 
             tcpSrc->set_cwnd(cwnd_pkts * Packet::data_packet_size());
@@ -450,6 +460,7 @@ int main(int argc, char **argv) {
             tcpSrc->setHystartEnabled(hystart_enabled);
             tcpSrc->setFastConvergenceEnabled(fast_convergence);
             tcpSrc->setTcpFriendlinessEnabled(true);
+            tcpSrc->setEcnEnabled(tcp_ecn_enabled);
 
             tcpRtxScanner.registerTcp(*tcpSrc);
 
@@ -707,8 +718,6 @@ int main(int argc, char **argv) {
 
         if (overlap_us > 0 && nscc_count > 0 && cubic_count > 0) {
             double phase2_us = timeAsUs(phase2_end) - timeAsUs(overlap_end);
-            double link_rate_gbps = linkspeed / 1e9;
-            uint64_t phase2_solo_bytes = (uint64_t)(link_rate_gbps * 1e9 / 8.0 * phase2_us / 1e6);
 
             int64_t nscc_phase1_bytes = (int64_t)nscc_total_bytes;
             int64_t cubic_phase1_bytes = (int64_t)cubic_total_bytes;
@@ -722,12 +731,42 @@ int main(int argc, char **argv) {
                 }
             }
 
+            // Estimate Phase 2 solo bytes per-flow: each surviving-protocol flow
+            // contributes based on its own average rate and its active time in Phase 2.
+            // This handles multi-flow experiments with staggered starts correctly.
+            double phase2_start_us = timeAsUs(overlap_end);
+            double phase2_end_us = timeAsUs(phase2_end);
+
+            auto estimate_phase2_bytes = [&](const string& survivor_proto) -> uint64_t {
+                uint64_t total = 0;
+                for (auto& rec : flow_records) {
+                    if (rec.protocol != survivor_proto) continue;
+                    double flow_start_us = timeAsUs(rec.start_time);
+                    double flow_end_us = (rec.finish_time > 0)
+                        ? timeAsUs(rec.finish_time) : phase2_end_us;
+                    double flow_lifetime_us = flow_end_us - flow_start_us;
+                    if (flow_lifetime_us <= 0 || rec.bytes_received == 0) continue;
+                    // How much of Phase 2 was this flow active?
+                    double active_start = max(phase2_start_us, flow_start_us);
+                    double active_end = min(phase2_end_us, flow_end_us);
+                    double active_us = max(0.0, active_end - active_start);
+                    // Estimate using this flow's own average rate
+                    double flow_avg_bps = (double)rec.bytes_received * 8.0 / (flow_lifetime_us / 1e6);
+                    total += (uint64_t)(flow_avg_bps * active_us / 1e6 / 8.0);
+                }
+                return total;
+            };
+
             if (nscc_finished_first && !cubic_finished_first) {
+                // NSCC finished first, Cubic ran solo in Phase 2.
+                uint64_t phase2_solo_bytes = estimate_phase2_bytes("CUBIC");
                 cubic_phase1_bytes = (int64_t)cubic_total_bytes - (int64_t)phase2_solo_bytes;
                 if (cubic_phase1_bytes < 0) cubic_phase1_bytes = 0;
                 cout << "NSCC finished first. Cubic ran solo for " << phase2_us << " us" << endl;
                 cout << "Estimated Cubic solo bytes (Phase 2): " << phase2_solo_bytes << endl;
             } else if (cubic_finished_first && !nscc_finished_first) {
+                // Cubic finished first, NSCC ran solo in Phase 2.
+                uint64_t phase2_solo_bytes = estimate_phase2_bytes("NSCC");
                 nscc_phase1_bytes = (int64_t)nscc_total_bytes - (int64_t)phase2_solo_bytes;
                 if (nscc_phase1_bytes < 0) nscc_phase1_bytes = 0;
                 cout << "Cubic finished first. NSCC ran solo for " << phase2_us << " us" << endl;
