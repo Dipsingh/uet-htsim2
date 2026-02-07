@@ -225,7 +225,7 @@ void RoceSrc::processPause(const EthPausePacket& p) {
         //we are allowed to send!
         //assert(_state_send != READY);
         _state_send = READY;
-        cout << "Source " << str() << " RESUME " << timeAsUs(eventlist().now()) << endl;
+        //cout << "Source " << str() << " RESUME " << timeAsUs(eventlist().now()) << endl;
         eventlist().sourceIsPendingRel(*this,0);
     }
 }
@@ -322,7 +322,7 @@ void RoceSrc::doNextEvent() {
         if (_log_me) 
             cout << "Src " << get_id() << " paused\n";
 
-        cout << "PAUSE" << endl;
+        //cout << "PAUSE" << endl;
         return;
     }
 
@@ -416,7 +416,7 @@ void RoceSink::receivePacket(Packet& pkt) {
             _epsn_rx_bitmap[seqno] = 1;
             _out_of_order_count++;
 
-            cout << this << " ooo count+ " << _out_of_order_count << endl;
+            //cout << this << " ooo count+ " << _out_of_order_count << endl;
 
             pkt.flow().logTraffic(pkt,*this,TrafficLogger::PKT_RCVDESTROY);
             p->free();
@@ -426,7 +426,7 @@ void RoceSink::receivePacket(Packet& pkt) {
         if (!_nack_sent){
             send_nack(ts,_cumulative_ack);  
             _nack_sent = true;
-            cout << "Wrong seqno received at Roce SINK " << seqno << " expecting " << _cumulative_ack << endl;
+            //cout << "Wrong seqno received at Roce SINK " << seqno << " expecting " << _cumulative_ack << endl;
         }
         pkt.flow().logTraffic(pkt,*this,TrafficLogger::PKT_RCVDESTROY);
 
@@ -445,7 +445,7 @@ void RoceSink::receivePacket(Packet& pkt) {
                 _cumulative_ack ++;
                 _epsn_rx_bitmap[_cumulative_ack] = 0;
                 _out_of_order_count--;
-                cout << this << " ooo count- " << _out_of_order_count << endl;
+                //cout << this << " ooo count- " << _out_of_order_count << endl;
             }
         }
         if (_nack_sent) 

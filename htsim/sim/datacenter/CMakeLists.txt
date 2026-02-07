@@ -47,6 +47,8 @@ add_executable(htsim_tcpcubic main_tcpcubic.cpp)
 
 add_executable(htsim_mixed main_mixed.cpp)
 
+add_executable(htsim_mixed_dcqcn main_mixed_dcqcn.cpp)
+
 # -------------------------------
 # Linking Executables with Libraries
 # -------------------------------
@@ -60,6 +62,7 @@ set (ALL_EXECUTABLES
     htsim_uec
     htsim_tcpcubic
     htsim_mixed
+    htsim_mixed_dcqcn
 )
 foreach(EXECUTABLE ${ALL_EXECUTABLES})
     # Link each executable with the 'htsim' library defined in the parent directory.

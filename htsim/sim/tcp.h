@@ -88,6 +88,8 @@ public:
 
     bool _established;
 
+    simtime_picosec _finish_time = 0;  // when this flow completed (0 = not finished)
+
     uint32_t _drops;
 
     TcpSink* _sink;

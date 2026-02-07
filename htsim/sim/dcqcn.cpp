@@ -63,11 +63,11 @@ void DCQCNSrc::processCNP(const CNPPacket& cnp){
     _byte_counter = 0;
     _old_highest_sent = _highest_sent;
 
-    cout << "At " << timeAsUs(eventlist().now()) << " " << _RC << " CNP received, reduced rate; target rate is " << _RT << " node " << nodename() << " alpha is " << _alpha;
+    //cout << "At " << timeAsUs(eventlist().now()) << " " << _RC << " CNP received, reduced rate; target rate is " << _RT << " node " << nodename() << " alpha is " << _alpha;
 
     _pacing_rate = _RC;
     update_spacing();
-    cout << " packet spacing is " << timeAsUs(_packet_spacing) << endl;
+    //cout << " packet spacing is " << timeAsUs(_packet_spacing) << endl;
 
     _last_cc_update = eventlist().now();
     _last_alpha_update = eventlist().now();
@@ -104,7 +104,7 @@ void DCQCNSrc::increaseRate(){
     _pacing_rate = _RC;
     update_spacing();
 
-    cout << "At " << timeAsUs(eventlist().now()) << " " << _RC << " increase target rate is " << _RT << " node " << nodename() << " packet spacing is " << timeAsUs(_packet_spacing) << " _T is " << _T << " _BC is " << _BC << " byte counter is " << _byte_counter << " alpha is " << _alpha << endl;
+    //cout << "At " << timeAsUs(eventlist().now()) << " " << _RC << " increase target rate is " << _RT << " node " << nodename() << " packet spacing is " << timeAsUs(_packet_spacing) << " _T is " << _T << " _BC is " << _BC << " byte counter is " << _byte_counter << " alpha is " << _alpha << endl;
 }
 
 void DCQCNSrc::doNextEvent(){
@@ -112,7 +112,7 @@ void DCQCNSrc::doNextEvent(){
 
     RoceSrc::doNextEvent();
 
-    cout << "Adding " << (_highest_sent - _old_highest_sent) << " to sent bytes " << _byte_counter << " " << _highest_sent << endl;
+    //cout << "Adding " << (_highest_sent - _old_highest_sent) << " to sent bytes " << _byte_counter << " " << _highest_sent << endl;
 
     _byte_counter += (_highest_sent - _old_highest_sent);
     _old_highest_sent = _highest_sent;
@@ -127,6 +127,7 @@ void DCQCNSrc::doNextEvent(){
 
     if (eventlist().now()-_last_alpha_update >= _cc_update_period){
         _alpha = (1-_g)*_alpha;
+        _last_alpha_update = eventlist().now();
         reschedule = true;
     }    
 

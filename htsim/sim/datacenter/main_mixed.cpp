@@ -7,6 +7,10 @@
  * - NSCC uses switch-based routing (packets forwarded via FatTreeSwitch)
  * - TCP Cubic uses route-based routing (pre-computed paths)
  * - Both traverse the SAME queues, competing for bandwidth
+ *
+ * Fairness measurement uses two complementary approaches:
+ * - Steady-state: use infinite flows (size 0) so bytes_received IS competitive throughput
+ * - Phase-analysis: for finite flows, decompose into overlap (competitive) and solo phases
  */
 #include "config.h"
 #include <sstream>
@@ -32,6 +36,7 @@
 #include "uec.h"
 #include "uec_mp.h"
 #include "nscc_trace_logger.h"
+#include "trigger.h"
 #include "firstfit.h"
 #include "topology.h"
 #include "connection_matrix.h"
@@ -60,6 +65,25 @@ struct FlowRecord {
     bool finished;
     uint64_t bytes_received;
     uint64_t retransmits;
+    simtime_picosec finish_time;  // 0 = not finished or infinite flow
+};
+
+// TriggerTarget subclass to capture NSCC flow completion time.
+// When an NSCC flow finishes, its end_trigger fires, which calls activate()
+// on this target, recording the current simulation time.
+class FlowFinishTracker : public TriggerTarget {
+public:
+    FlowFinishTracker(EventList& el, simtime_picosec* finish_time_ptr)
+        : _eventlist(el), _finish_time_ptr(finish_time_ptr) {}
+
+    void activate() override {
+        if (*_finish_time_ptr == 0) {
+            *_finish_time_ptr = _eventlist.now();
+        }
+    }
+private:
+    EventList& _eventlist;
+    simtime_picosec* _finish_time_ptr;
 };
 
 void exit_error(char* progr) {
@@ -316,6 +340,10 @@ int main(int argc, char **argv) {
     vector<UecSink*> nscc_sinks;
     vector<FlowRecord> flow_records;
 
+    // Triggers and trackers for capturing NSCC completion times
+    vector<SingleShotTrigger*> nscc_triggers;
+    vector<FlowFinishTracker*> nscc_trackers;
+
     uint32_t nscc_count = 0, cubic_count = 0;
     uint32_t total_conns = all_conns->size();
     uint32_t nscc_target = (uint32_t)(total_conns * nscc_ratio);
@@ -341,6 +369,7 @@ int main(int argc, char **argv) {
         rec.finished = false;
         rec.bytes_received = 0;
         rec.retransmits = 0;
+        rec.finish_time = 0;
 
         if (use_nscc) {
             rec.protocol = "NSCC";
@@ -439,6 +468,25 @@ int main(int argc, char **argv) {
         flow_records.push_back(rec);
     }
 
+    // Hook up NSCC end triggers to capture completion times.
+    // We do this after flow_records is fully populated so pointers to finish_time are stable.
+    {
+        uint32_t nscc_ix = 0;
+        for (auto& rec : flow_records) {
+            if (rec.protocol == "NSCC") {
+                if (rec.flow_size_bytes > 0) {
+                    auto* tracker = new FlowFinishTracker(eventlist, &rec.finish_time);
+                    auto* trigger = new SingleShotTrigger(eventlist, rec.flow_id);
+                    trigger->add_target(*tracker);
+                    nscc_srcs[nscc_ix]->setEndTrigger(*trigger);
+                    nscc_triggers.push_back(trigger);
+                    nscc_trackers.push_back(tracker);
+                }
+                nscc_ix++;
+            }
+        }
+    }
+
     cout << "Created " << nscc_count << " NSCC flows and " << cubic_count << " TCP Cubic flows" << endl;
     cout << "Both protocols share the SAME network queues - they will compete for bandwidth" << endl;
 
@@ -466,8 +514,14 @@ int main(int argc, char **argv) {
             UecSrc* src_ptr = nscc_srcs[nscc_idx];
             UecSink* snk_ptr = nscc_sinks[nscc_idx];
             rec.finished = src_ptr->isTotallyFinished();
-            rec.bytes_received = snk_ptr->total_received();
+            // Use unique bytes: (cumulative_ack - rts_pkts) * mss
+            // cumulative_ack() returns _expected_epsn (packet count),
+            // total_received() double-counts retransmits and includes headers
+            uint64_t data_pkts = snk_ptr->cumulative_ack();
+            uint64_t rts_pkts = src_ptr->stats().rts_pkts_sent;
+            rec.bytes_received = (data_pkts > rts_pkts) ? (data_pkts - rts_pkts) * UecSrc::_mss : 0;
             rec.retransmits = 0; // NSCC doesn't expose retransmit count the same way
+            // finish_time already set by FlowFinishTracker via end_trigger
             nscc_idx++;
         } else {
             TcpCubicSrc* src_ptr = cubic_srcs[cubic_idx];
@@ -475,6 +529,7 @@ int main(int argc, char **argv) {
             rec.bytes_received = snk_ptr->cumulative_ack();
             rec.finished = (src_ptr->_last_acked >= src_ptr->_flow_size && src_ptr->_flow_size > 0);
             rec.retransmits = src_ptr->_drops;
+            rec.finish_time = src_ptr->_finish_time;
             cubic_idx++;
         }
     }
@@ -485,27 +540,21 @@ int main(int argc, char **argv) {
     if (csv_file) {
         ofstream csv(csv_file);
         if (csv.is_open()) {
-            csv << "flow_id,protocol,src,dst,size_bytes,start_us,fct_us,throughput_gbps,finished,bytes_received,retransmits" << endl;
+            csv << "flow_id,protocol,src,dst,size_bytes,start_us,finish_time_us,fct_us,throughput_gbps,finished,bytes_received,retransmits" << endl;
             for (auto& rec : flow_records) {
                 double start_us = timeAsUs(rec.start_time);
+                double finish_us = rec.finish_time > 0 ? timeAsUs(rec.finish_time) : -1;
                 double fct_us = -1;
                 double throughput_gbps = 0;
 
-                if (rec.finished && rec.flow_size_bytes > 0) {
-                    // For finished flows, use bytes_received to estimate completion
-                    // FCT = time from start until all bytes received
-                    // We approximate: the flow finished somewhere before sim_end
-                    // Since we don't have exact finish timestamps in all cases,
-                    // use sim_end as upper bound for unfinished, actual for finished
-                    double elapsed_us = timeAsUs(sim_end) - start_us;
-                    if (elapsed_us > 0) {
-                        fct_us = elapsed_us;
-                        throughput_gbps = (rec.bytes_received * 8.0) / (elapsed_us * 1000.0);
+                if (rec.finished && rec.finish_time > 0) {
+                    fct_us = finish_us - start_us;
+                    if (fct_us > 0) {
+                        throughput_gbps = (rec.bytes_received * 8.0) / (fct_us * 1000.0);
                     }
                 } else if (rec.bytes_received > 0) {
                     double elapsed_us = timeAsUs(sim_end) - start_us;
                     if (elapsed_us > 0) {
-                        fct_us = elapsed_us; // still running at sim end
                         throughput_gbps = (rec.bytes_received * 8.0) / (elapsed_us * 1000.0);
                     }
                 }
@@ -516,6 +565,7 @@ int main(int argc, char **argv) {
                     << rec.dst << ","
                     << rec.flow_size_bytes << ","
                     << start_us << ","
+                    << finish_us << ","
                     << fct_us << ","
                     << throughput_gbps << ","
                     << (rec.finished ? 1 : 0) << ","
@@ -547,16 +597,15 @@ int main(int argc, char **argv) {
         nscc_total_bytes += rec.bytes_received;
         if (rec.finished) nscc_finished++;
         if (rec.bytes_received > 0) {
-            double elapsed_us = timeAsUs(sim_end) - timeAsUs(rec.start_time);
+            double end_us = (rec.finish_time > 0) ? timeAsUs(rec.finish_time) : timeAsUs(sim_end);
+            double elapsed_us = end_us - timeAsUs(rec.start_time);
             if (elapsed_us > 0) {
                 nscc_throughputs.push_back((rec.bytes_received * 8.0) / (elapsed_us * 1000.0));
             }
         }
     }
     cout << "NSCC flows completed: " << nscc_finished << "/" << nscc_count << endl;
-    cout << "NSCC total bytes received: " << nscc_total_bytes << endl;
-    double nscc_throughput_gbps = (nscc_total_bytes * 8.0) / (end_time * 1000.0);
-    cout << "NSCC aggregate throughput: " << nscc_throughput_gbps << " Gbps" << endl;
+    cout << "NSCC total bytes received (unique): " << nscc_total_bytes << endl;
     if (!nscc_throughputs.empty()) {
         sort(nscc_throughputs.begin(), nscc_throughputs.end());
         double sum = accumulate(nscc_throughputs.begin(), nscc_throughputs.end(), 0.0);
@@ -578,7 +627,8 @@ int main(int argc, char **argv) {
         cubic_retx += rec.retransmits;
         if (rec.finished) cubic_finished++;
         if (rec.bytes_received > 0) {
-            double elapsed_us = timeAsUs(sim_end) - timeAsUs(rec.start_time);
+            double end_us = (rec.finish_time > 0) ? timeAsUs(rec.finish_time) : timeAsUs(sim_end);
+            double elapsed_us = end_us - timeAsUs(rec.start_time);
             if (elapsed_us > 0) {
                 cubic_throughputs.push_back((rec.bytes_received * 8.0) / (elapsed_us * 1000.0));
             }
@@ -587,8 +637,6 @@ int main(int argc, char **argv) {
     cout << "TCP Cubic flows completed: " << cubic_finished << "/" << cubic_count << endl;
     cout << "TCP Cubic total bytes received: " << cubic_total_bytes << endl;
     cout << "TCP Cubic retransmits: " << cubic_retx << endl;
-    double cubic_throughput_gbps = (cubic_total_bytes * 8.0) / (end_time * 1000.0);
-    cout << "TCP Cubic aggregate throughput: " << cubic_throughput_gbps << " Gbps" << endl;
     if (!cubic_throughputs.empty()) {
         sort(cubic_throughputs.begin(), cubic_throughputs.end());
         double sum = accumulate(cubic_throughputs.begin(), cubic_throughputs.end(), 0.0);
@@ -598,33 +646,129 @@ int main(int argc, char **argv) {
              << endl;
     }
 
-    // Bandwidth share and fairness
-    cout << "\n=== Bandwidth Share Analysis ===" << endl;
-    double total_bytes = nscc_total_bytes + cubic_total_bytes;
-    if (total_bytes > 0) {
-        double nscc_share = (nscc_total_bytes * 100.0) / total_bytes;
-        double cubic_share = (cubic_total_bytes * 100.0) / total_bytes;
+    // ========================================
+    // Phase-based competitive fairness analysis
+    // ========================================
+    cout << "\n=== Competitive Fairness Analysis ===" << endl;
 
-        cout << "NSCC bandwidth share: " << nscc_share << "%" << endl;
-        cout << "TCP Cubic bandwidth share: " << cubic_share << "%" << endl;
+    bool all_still_running = true;
+    simtime_picosec earliest_finish = sim_end;
+    simtime_picosec latest_finish = 0;
+    simtime_picosec latest_start = 0;
+    for (auto& rec : flow_records) {
+        if (rec.finish_time > 0) {
+            all_still_running = false;
+            if (rec.finish_time < earliest_finish)
+                earliest_finish = rec.finish_time;
+            if (rec.finish_time > latest_finish)
+                latest_finish = rec.finish_time;
+        }
+        if (rec.start_time > latest_start)
+            latest_start = rec.start_time;
+    }
 
-        if (nscc_count > 0 && cubic_count > 0) {
-            double expected_nscc_share = (nscc_count * 100.0) / (nscc_count + cubic_count);
-            double expected_cubic_share = (cubic_count * 100.0) / (nscc_count + cubic_count);
-            cout << "\nExpected fair share (by flow count):" << endl;
-            cout << "  NSCC: " << expected_nscc_share << "%" << endl;
-            cout << "  TCP Cubic: " << expected_cubic_share << "%" << endl;
+    if (all_still_running) {
+        cout << "Mode: STEADY-STATE (all flows active for entire simulation)" << endl;
+        cout << "Measurement window: " << timeAsUs(latest_start) << " - " << timeAsUs(sim_end)
+             << " us (" << timeAsUs(sim_end - latest_start) << " us)" << endl;
 
-            double nscc_fairness_ratio = nscc_share / expected_nscc_share;
-            double cubic_fairness_ratio = cubic_share / expected_cubic_share;
-            cout << "\nFairness ratio (actual/expected):" << endl;
-            cout << "  NSCC: " << nscc_fairness_ratio << "x" << endl;
-            cout << "  TCP Cubic: " << cubic_fairness_ratio << "x" << endl;
+        double total_bytes = nscc_total_bytes + cubic_total_bytes;
+        if (total_bytes > 0 && nscc_count > 0 && cubic_count > 0) {
+            double nscc_share = (nscc_total_bytes * 100.0) / total_bytes;
+            double cubic_share = (cubic_total_bytes * 100.0) / total_bytes;
+
+            double window_us = timeAsUs(sim_end - latest_start);
+            double nscc_gbps = (nscc_total_bytes * 8.0) / (window_us * 1000.0);
+            double cubic_gbps = (cubic_total_bytes * 8.0) / (window_us * 1000.0);
+
+            cout << "NSCC:  " << nscc_total_bytes << " bytes, "
+                 << nscc_gbps << " Gbps, share=" << nscc_share << "%" << endl;
+            cout << "Cubic: " << cubic_total_bytes << " bytes, "
+                 << cubic_gbps << " Gbps, share=" << cubic_share << "%" << endl;
+
+            double sum_x = nscc_gbps + cubic_gbps;
+            double sum_x2 = nscc_gbps * nscc_gbps + cubic_gbps * cubic_gbps;
+            double jfi = (sum_x * sum_x) / (2.0 * sum_x2);
+            cout << "Competitive JFI: " << jfi << endl;
+        }
+
+    } else {
+        cout << "Mode: PHASE ANALYSIS (at least one flow completed)" << endl;
+
+        simtime_picosec overlap_end = earliest_finish;
+        simtime_picosec overlap_start = latest_start;
+        double overlap_us = timeAsUs(overlap_end) - timeAsUs(overlap_start);
+
+        cout << "Phase 1 (overlap): " << timeAsUs(overlap_start) << " - " << timeAsUs(overlap_end)
+             << " us (" << overlap_us << " us)" << endl;
+        simtime_picosec phase2_end = latest_finish > 0 ? latest_finish : sim_end;
+        cout << "Phase 2 (solo):    " << timeAsUs(overlap_end) << " - " << timeAsUs(phase2_end)
+             << " us (" << (timeAsUs(phase2_end) - timeAsUs(overlap_end)) << " us)" << endl;
+
+        if (overlap_us > 0 && nscc_count > 0 && cubic_count > 0) {
+            double phase2_us = timeAsUs(phase2_end) - timeAsUs(overlap_end);
+            double link_rate_gbps = linkspeed / 1e9;
+            uint64_t phase2_solo_bytes = (uint64_t)(link_rate_gbps * 1e9 / 8.0 * phase2_us / 1e6);
+
+            int64_t nscc_phase1_bytes = (int64_t)nscc_total_bytes;
+            int64_t cubic_phase1_bytes = (int64_t)cubic_total_bytes;
+
+            bool nscc_finished_first = false;
+            bool cubic_finished_first = false;
+            for (auto& rec : flow_records) {
+                if (rec.finish_time == earliest_finish) {
+                    if (rec.protocol == "NSCC") nscc_finished_first = true;
+                    else cubic_finished_first = true;
+                }
+            }
+
+            if (nscc_finished_first && !cubic_finished_first) {
+                cubic_phase1_bytes = (int64_t)cubic_total_bytes - (int64_t)phase2_solo_bytes;
+                if (cubic_phase1_bytes < 0) cubic_phase1_bytes = 0;
+                cout << "NSCC finished first. Cubic ran solo for " << phase2_us << " us" << endl;
+                cout << "Estimated Cubic solo bytes (Phase 2): " << phase2_solo_bytes << endl;
+            } else if (cubic_finished_first && !nscc_finished_first) {
+                nscc_phase1_bytes = (int64_t)nscc_total_bytes - (int64_t)phase2_solo_bytes;
+                if (nscc_phase1_bytes < 0) nscc_phase1_bytes = 0;
+                cout << "Cubic finished first. NSCC ran solo for " << phase2_us << " us" << endl;
+                cout << "Estimated NSCC solo bytes (Phase 2): " << phase2_solo_bytes << endl;
+            } else {
+                cout << "Both protocols finished at the same time (or all finished)" << endl;
+            }
+
+            double phase1_total = (double)nscc_phase1_bytes + (double)cubic_phase1_bytes;
+            if (phase1_total > 0) {
+                double nscc_share = (nscc_phase1_bytes * 100.0) / phase1_total;
+                double cubic_share = (cubic_phase1_bytes * 100.0) / phase1_total;
+
+                double nscc_phase1_gbps = (nscc_phase1_bytes * 8.0) / (overlap_us * 1000.0);
+                double cubic_phase1_gbps = (cubic_phase1_bytes * 8.0) / (overlap_us * 1000.0);
+
+                cout << "\nCompetitive throughput (Phase 1 only):" << endl;
+                cout << "  NSCC:  " << nscc_phase1_bytes << " bytes, " << nscc_phase1_gbps << " Gbps" << endl;
+                cout << "  Cubic: " << cubic_phase1_bytes << " bytes, " << cubic_phase1_gbps << " Gbps" << endl;
+                cout << "\nCompetitive bandwidth share:" << endl;
+                cout << "  NSCC:  " << nscc_share << "%" << endl;
+                cout << "  Cubic: " << cubic_share << "%" << endl;
+
+                double sum_x = nscc_phase1_gbps + cubic_phase1_gbps;
+                double sum_x2 = nscc_phase1_gbps * nscc_phase1_gbps + cubic_phase1_gbps * cubic_phase1_gbps;
+                double jfi = (sum_x * sum_x) / (2.0 * sum_x2);
+                cout << "Competitive JFI: " << jfi << endl;
+            }
         }
     }
 
-    // Jain's fairness index across all flows (normalized throughput)
-    cout << "\n=== Jain's Fairness Index ===" << endl;
+    // Raw bandwidth share for comparison
+    cout << "\n=== Raw Bandwidth Share (total bytes, for reference) ===" << endl;
+    double total_bytes = nscc_total_bytes + cubic_total_bytes;
+    if (total_bytes > 0) {
+        cout << "NSCC:  " << (nscc_total_bytes * 100.0) / total_bytes << "%" << endl;
+        cout << "Cubic: " << (cubic_total_bytes * 100.0) / total_bytes << "%" << endl;
+    }
+
+    // Jain's fairness index across all flows
+    cout << "\n=== Jain's Fairness Index (per-flow) ===" << endl;
     vector<double> all_throughputs;
     all_throughputs.insert(all_throughputs.end(), nscc_throughputs.begin(), nscc_throughputs.end());
     all_throughputs.insert(all_throughputs.end(), cubic_throughputs.begin(), cubic_throughputs.end());
@@ -637,29 +781,17 @@ int main(int argc, char **argv) {
         double n = all_throughputs.size();
         double jains_fi = (sum_x * sum_x) / (n * sum_x2);
         cout << "Jain's Fairness Index (all flows): " << jains_fi << endl;
-
-        // Per-protocol Jain's FI
-        if (nscc_throughputs.size() > 1) {
-            sum_x = 0; sum_x2 = 0;
-            for (double t : nscc_throughputs) { sum_x += t; sum_x2 += t * t; }
-            n = nscc_throughputs.size();
-            cout << "Jain's FI (NSCC only): " << (sum_x * sum_x) / (n * sum_x2) << endl;
-        }
-        if (cubic_throughputs.size() > 1) {
-            sum_x = 0; sum_x2 = 0;
-            for (double t : cubic_throughputs) { sum_x += t; sum_x2 += t * t; }
-            n = cubic_throughputs.size();
-            cout << "Jain's FI (TCP Cubic only): " << (sum_x * sum_x) / (n * sum_x2) << endl;
-        }
     }
 
-    // Clean up trace logger
+    // Clean up
     if (trace_logger) {
         UecSrc::setTraceLogger(nullptr);
         trace_logger.reset();
     }
 
-    // Clean up path cache
+    for (auto* t : nscc_triggers) delete t;
+    for (auto* t : nscc_trackers) delete t;
+
     for (uint32_t n = 0; n < no_of_nodes; n++) {
         delete[] net_paths[n];
     }
