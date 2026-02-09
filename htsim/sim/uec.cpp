@@ -16,6 +16,12 @@ int UecSrc::_global_node_count = 0;
 bool UecSrc::_shown = false;
 NsccTraceLogger* UecSrc::_trace_logger = nullptr;
 mem_b UecSrc::_configured_maxwnd = 0;
+double UecSrc::_maxwnd_multiplier = 1.5;
+simtime_picosec UecSrc::_delay_hysteresis_band = 0;
+simtime_picosec UecSrc::_target_Qdelay_lo = 0;
+simtime_picosec UecSrc::_target_Qdelay_hi = 0;
+double UecSrc::_q3_pressure = 0.0;
+bool UecSrc::_symmetric_delay_estimator = false;
 
 /* _min_rto can be tuned using setMinRTO. Don't change it here.  */
 simtime_picosec UecSrc::_min_rto = timeFromUs((uint32_t)DEFAULT_UEC_RTO_MIN);
@@ -117,7 +123,11 @@ void UecSrc::initNsccParams(simtime_picosec network_rtt,
     } else {
         _qa_gate = qa_gate;
     }
-    _qa_threshold = 4 * _target_Qdelay; 
+    _qa_threshold = 4 * _target_Qdelay;
+
+    // Compute hysteresis thresholds (when band=0, lo=hi=target → original behavior)
+    _target_Qdelay_lo = (_target_Qdelay > _delay_hysteresis_band) ? (_target_Qdelay - _delay_hysteresis_band) : 0;
+    _target_Qdelay_hi = _target_Qdelay + _delay_hysteresis_band;
 
     _scaling_factor_a = (double)_network_bdp/(double)_reference_network_bdp;
     _scaling_factor_b = (double)_target_Qdelay/(double)_reference_network_rtt; // no unit
@@ -156,6 +166,10 @@ void UecSrc::initNsccParams(simtime_picosec network_rtt,
         << " _delay_alpha=" << _delay_alpha 
         << " _adjust_period_threshold=" << _adjust_period_threshold
         << " _adjust_bytes_threshold=" << _adjust_bytes_threshold
+        << " _target_Qdelay_lo=" << _target_Qdelay_lo
+        << " _target_Qdelay_hi=" << _target_Qdelay_hi
+        << " _q3_pressure=" << _q3_pressure
+        << " _symmetric_delay=" << _symmetric_delay_estimator
         << endl;
 }
 
@@ -164,8 +178,8 @@ void UecSrc::initNscc(mem_b cwnd, simtime_picosec peer_rtt) {
     _base_bdp = timeAsSec(_base_rtt)*(_nic.linkspeed()/8);
     _bdp = _base_bdp;
 
-    setMaxWnd(1.5*_bdp);
-    setConfiguredMaxWnd(1.5*_bdp);
+    setMaxWnd(_maxwnd_multiplier*_bdp);
+    setConfiguredMaxWnd(_maxwnd_multiplier*_bdp);
 
     if (cwnd == 0) {
         _cwnd = _maxwnd;
@@ -190,8 +204,8 @@ void UecSrc::initRccc(mem_b cwnd, simtime_picosec peer_rtt) {
     _base_bdp = timeAsSec(_base_rtt)*(_nic.linkspeed()/8);
     _bdp = _base_bdp;
 
-    setMaxWnd(1.5*_bdp);
-    setConfiguredMaxWnd(1.5*_bdp);
+    setMaxWnd(_maxwnd_multiplier*_bdp);
+    setConfiguredMaxWnd(_maxwnd_multiplier*_bdp);
 
     if (cwnd == 0) {
         _cwnd = _maxwnd;
@@ -1177,6 +1191,7 @@ bool UecSrc::quick_adapt(bool is_loss, bool skip, simtime_picosec delay) {
             _nscc_overall_stats.dec_quick_bytes += before - _cwnd;
             _nscc_fulfill_stats.dec_quick_bytes += before - _cwnd;
             _last_quadrant = 5;  // QA event
+            _qa_count++;
 
             if (_trace_logger) {
                 _trace_logger->logQAEvent(eventlist().now(), _flow.flow_id(),
@@ -1217,11 +1232,11 @@ void UecSrc::proportional_increase(uint32_t newly_acked_bytes,simtime_picosec de
     if (_increase)
         return;
     
-    //make sure targetQdelay > delay;
-    assert(_target_Qdelay > delay);
+    //make sure targetQdelay_lo > delay;
+    assert(_target_Qdelay_lo > delay);
 
     mem_b before = _inc_bytes;
-    _inc_bytes += _alpha * newly_acked_bytes * (_target_Qdelay - delay);
+    _inc_bytes += _alpha * newly_acked_bytes * (_target_Qdelay_lo - delay);
     _nscc_fulfill_stats.inc_prop_bytes += _inc_bytes - before;
 }
 
@@ -1248,10 +1263,10 @@ void UecSrc::multiplicative_decrease() {
     _increase = false;
     _fi_count = 0;
     simtime_picosec avg_delay = get_avg_delay();
-    if (avg_delay > _target_Qdelay){
+    if (avg_delay > _target_Qdelay_hi){
         if (eventlist().now() - _last_dec_time > _base_rtt){
             mem_b before = _cwnd;
-            _cwnd *= max(1-_gamma*(avg_delay-_target_Qdelay)/avg_delay, 0.5);/*_max_md_jump instead of 1*/
+            _cwnd *= max(1-_gamma*(avg_delay-_target_Qdelay_hi)/avg_delay, 0.5);/*_max_md_jump instead of 1*/
             _cwnd = max(_cwnd, _min_cwnd);
             _nscc_overall_stats.dec_multi_bytes += before - _cwnd;
             _nscc_fulfill_stats.dec_multi_bytes += before - _cwnd;
@@ -1335,28 +1350,41 @@ void UecSrc::updateCwndOnAck_NSCC(bool skip, simtime_picosec delay, mem_b newly_
     if (quick_adapt(false, skip, delay))
         return;
 
-    if (!skip && delay >= _target_Qdelay) {
-        _last_quadrant = 0;  // Q0: no-trim, delay >= target → fair increase
+    if (!skip && delay >= _target_Qdelay_hi) {
+        _last_quadrant = 0;  // Q0: no-ECN, delay above band → fair increase
+        _q0_count++;
         fair_increase(newly_acked_bytes);
         if (_flow.flow_id() == _debug_flowid || UecSrc::_debug) {
             cout << timeAsUs(eventlist().now()) <<" flowid " << _flow.flow_id()<< " " << _flow.str() << " fair_increase _nscc_cwnd " << _cwnd
                 << " newly_acked_bytes " << newly_acked_bytes
                 << " fi " << _fi << endl;
         }
-    } else if (!skip && delay < _target_Qdelay) {
-        _last_quadrant = 1;  // Q1: no-trim, delay < target → proportional increase
+    } else if (!skip && delay < _target_Qdelay_lo) {
+        _last_quadrant = 1;  // Q1: no-ECN, delay below band → proportional increase
+        _q1_count++;
         proportional_increase(newly_acked_bytes,delay);
         if (_flow.flow_id() == _debug_flowid || UecSrc::_debug) {
             cout << timeAsUs(eventlist().now()) <<" flowid " << _flow.flow_id()<< " " << _flow.str() << " proportional_increase _nscc_cwnd " << _cwnd << endl;
         }
-    } else if (skip && delay >= _target_Qdelay) {
-        _last_quadrant = 2;  // Q2: trim, delay >= target → multiplicative decrease
+    } else if (skip && delay >= _target_Qdelay_hi) {
+        _last_quadrant = 2;  // Q2: ECN, delay above band → multiplicative decrease
+        _q2_count++;
         multiplicative_decrease();
         if (_flow.flow_id() == _debug_flowid || UecSrc::_debug) {
             cout << timeAsUs(eventlist().now()) <<" flowid " << _flow.flow_id()<< " " << _flow.str() << " multiplicative_decrease _nscc_cwnd " << _cwnd << endl;
         }
-    } else if (skip && delay < _target_Qdelay) {
-        _last_quadrant = 3;  // Q3: trim, delay < target → noop / switch path
+    } else if (skip && delay < _target_Qdelay_lo) {
+        _last_quadrant = 3;  // Q3: ECN, delay below band → weak pressure or noop
+        _q3_count++;
+        if (_q3_pressure > 0.0 && eventlist().now() - _last_q3_pressure_time > _base_rtt) {
+            mem_b before = _cwnd;
+            _cwnd *= (1.0 - _q3_pressure);
+            _cwnd = max(_cwnd, _min_cwnd);
+            _last_q3_pressure_time = eventlist().now();
+        }
+    } else {
+        _last_quadrant = 4;  // Q4: neutral zone (within hysteresis band)
+        _q4_count++;
     }
 
     // Check here, fulfill_adjustment requires valid cwnd.
@@ -1415,7 +1443,7 @@ void UecSrc::update_base_rtt(simtime_picosec raw_rtt){
     if (_base_rtt > raw_rtt) {
         _base_rtt = raw_rtt;
         _bdp = timeAsUs(raw_rtt) * _nic.linkspeed() / 8000000; 
-        _maxwnd = 1.5 * _bdp;
+        _maxwnd = _maxwnd_multiplier * _bdp;
         
         if (UecSrc::_debug)
             cout << "Reinit BDP and MAXWND to "  << _bdp << " " << _maxwnd << " in pkts " << _maxwnd/_mtu << endl;
@@ -1428,7 +1456,8 @@ void UecSrc::update_delay(simtime_picosec raw_rtt, bool update_avg, bool skip){
     simtime_picosec delay = raw_rtt - _base_rtt;
     if(update_avg){
 
-        if(skip == false && delay > _target_Qdelay){
+        if(!_symmetric_delay_estimator && skip == false && delay > _target_Qdelay){
+            // Original asymmetric path: bias avg_delay toward base_rtt/4
             _avg_delay = _delay_alpha * _base_rtt*0.25 + (1-_delay_alpha) * _avg_delay;
         }else{
             if (delay > 5*_base_rtt)

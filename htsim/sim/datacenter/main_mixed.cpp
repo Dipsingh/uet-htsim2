@@ -87,6 +87,92 @@ private:
     simtime_picosec* _finish_time_ptr;
 };
 
+// Periodic sampler — writes a unified time-series CSV at fixed intervals.
+// Uses CompositeQueue::_queuesize_low (not total queuesize()) because ECN
+// marking in decide_ECN() is based solely on the low-priority data queue.
+class PeriodicSampler : public EventSource {
+public:
+    PeriodicSampler(EventList& ev, simtime_picosec interval, const string& filepath,
+                    vector<TcpSrc*>& tcp_srcs, vector<TcpSink*>& tcp_sinks,
+                    vector<UecSrc*>& nscc_srcs, vector<UecSink*>& nscc_sinks,
+                    CompositeQueue* bottleneck_queue,
+                    mem_b ecn_kmin, mem_b ecn_kmax, mem_b bdp, double linkspeed_gbps,
+                    bool tcp_ecn_enabled)
+        : EventSource(ev, "sampler"), _interval(interval),
+          _tcp_srcs(tcp_srcs), _tcp_sinks(tcp_sinks),
+          _nscc_srcs(nscc_srcs), _nscc_sinks(nscc_sinks),
+          _bottleneck(bottleneck_queue)
+    {
+        _out.open(filepath);
+        if (!_out.is_open()) {
+            cerr << "PeriodicSampler: failed to open " << filepath << endl;
+            return;
+        }
+        // Write metadata line (parsed by plot script)
+        _out << "# ecn_kmin=" << ecn_kmin
+             << " ecn_kmax=" << ecn_kmax
+             << " bdp=" << bdp
+             << " linkspeed_gbps=" << linkspeed_gbps
+             << " tcp_ecn=" << (tcp_ecn_enabled ? 1 : 0) << endl;
+        // Write header
+        _out << "time_us";
+        for (size_t i = 0; i < _tcp_srcs.size(); i++)
+            _out << ",tcp" << i << "_cwnd,tcp" << i << "_bytes_acked,tcp" << i << "_drops";
+        for (size_t i = 0; i < _nscc_srcs.size(); i++)
+            _out << ",nscc" << i << "_cwnd,nscc" << i << "_bytes"
+                 << ",nscc" << i << "_q0,nscc" << i << "_q1"
+                 << ",nscc" << i << "_q2,nscc" << i << "_q3"
+                 << ",nscc" << i << "_qa,nscc" << i << "_q4";
+        _out << ",queue_bytes,queue_drops" << endl;
+
+        ev.sourceIsPending(*this, ev.now());
+    }
+
+    void doNextEvent() override {
+        if (!_out.is_open()) return;
+
+        double t_us = timeAsUs(eventlist().now());
+        _out << t_us;
+
+        for (size_t i = 0; i < _tcp_srcs.size(); i++) {
+            _out << "," << _tcp_srcs[i]->_cwnd
+                 << "," << _tcp_sinks[i]->total_received()
+                 << "," << _tcp_srcs[i]->_drops;
+        }
+        for (size_t i = 0; i < _nscc_srcs.size(); i++) {
+            uint64_t data_pkts = _nscc_sinks[i]->cumulative_ack();
+            uint64_t rts_pkts = _nscc_srcs[i]->stats().rts_pkts_sent;
+            uint64_t unique_bytes = (data_pkts > rts_pkts) ? (data_pkts - rts_pkts) * UecSrc::_mss : 0;
+            _out << "," << _nscc_srcs[i]->cwnd()
+                 << "," << unique_bytes
+                 << "," << _nscc_srcs[i]->_q0_count
+                 << "," << _nscc_srcs[i]->_q1_count
+                 << "," << _nscc_srcs[i]->_q2_count
+                 << "," << _nscc_srcs[i]->_q3_count
+                 << "," << _nscc_srcs[i]->_qa_count
+                 << "," << _nscc_srcs[i]->_q4_count;
+        }
+        // Sample _queuesize_low — this is what decide_ECN() compares against Kmin/Kmax
+        _out << "," << _bottleneck->_queuesize_low
+             << "," << _bottleneck->num_drops() << endl;
+
+        eventlist().sourceIsPending(*this, eventlist().now() + _interval);
+    }
+
+    ~PeriodicSampler() {
+        if (_out.is_open()) _out.close();
+    }
+
+private:
+    simtime_picosec _interval;
+    vector<TcpSrc*>& _tcp_srcs;
+    vector<TcpSink*>& _tcp_sinks;
+    vector<UecSrc*>& _nscc_srcs;
+    vector<UecSink*>& _nscc_sinks;
+    CompositeQueue* _bottleneck;
+    ofstream _out;
+};
+
 void exit_error(char* progr) {
     cout << "Usage " << progr
          << " [-o output_file]"
@@ -107,7 +193,17 @@ void exit_error(char* progr) {
          << " [-fast_conv 0|1]"
          << " [-csv csv_output_file]"
          << " [-trace trace_output_file]"
+         << " [-sample timeseries_csv_file]"
          << " [-ecn]"
+         << " [-disable_trim]"
+         << " [-tail_drop]"
+         << " [-ecn_kmin bytes]"
+         << " [-ecn_kmax bytes]"
+         << " [-maxwnd_mult multiplier]"
+         << " [-delay_hysteresis half_band_us]"
+         << " [-q3_pressure fraction]"
+         << " [-symmetric_delay]"
+         << " [-tcp_reno]"
          << endl;
     exit(1);
 }
@@ -129,21 +225,31 @@ int main(int argc, char **argv) {
     uint32_t ports = 1;
     uint16_t path_entropy_size = 16;
     bool enable_ecn = false;
+    bool disable_trim = false;
+    bool tail_drop = false;
+    mem_b ecn_kmin_override = 0;  // 0 = use default (queue/4)
+    mem_b ecn_kmax_override = 0;  // 0 = use default (queue*97/100)
 
     // NSCC parameters
     uint32_t target_q_delay_us = 5;
     uint32_t qa_gate = 2;
+    double maxwnd_mult = 1.5;
+    double delay_hysteresis_us = 0.0;
+    double q3_pressure = 0.0;
+    bool symmetric_delay = false;
 
-    // TCP Cubic parameters
+    // TCP parameters
     uint32_t cwnd_pkts = 10;
     bool hystart_enabled = true;
     bool fast_convergence = true;
     bool tcp_ecn_enabled = true;
+    bool tcp_reno = false;
 
     char* tm_file = NULL;
     char* topo_file = NULL;
     char* csv_file = NULL;
     char* trace_file = NULL;
+    char* sample_file = NULL;
 
     while (i < argc) {
         if (!strcmp(argv[i], "-o")) {
@@ -225,6 +331,42 @@ int main(int argc, char **argv) {
             tcp_ecn_enabled = atoi(argv[i+1]) != 0;
             cout << "TCP Cubic ECN response " << (tcp_ecn_enabled ? "enabled" : "disabled") << endl;
             i++;
+        } else if (!strcmp(argv[i], "-sample")) {
+            sample_file = argv[i+1];
+            cout << "Time-series sampling: " << sample_file << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-maxwnd_mult")) {
+            maxwnd_mult = atof(argv[i+1]);
+            cout << "NSCC maxwnd multiplier " << maxwnd_mult << "x BDP" << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-delay_hysteresis")) {
+            delay_hysteresis_us = atof(argv[i+1]);
+            cout << "NSCC delay hysteresis band +/-" << delay_hysteresis_us << " us" << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-q3_pressure")) {
+            q3_pressure = atof(argv[i+1]);
+            cout << "NSCC Q3 pressure " << q3_pressure << " per RTT" << endl;
+            i++;
+        } else if (!strcmp(argv[i], "-symmetric_delay")) {
+            symmetric_delay = true;
+            cout << "NSCC symmetric delay estimator enabled" << endl;
+        } else if (!strcmp(argv[i], "-disable_trim")) {
+            disable_trim = true;
+            cout << "Trimming disabled, dropping instead." << endl;
+        } else if (!strcmp(argv[i], "-tail_drop")) {
+            tail_drop = true;
+            cout << "Tail-drop mode: always drop arriving packet when queue full" << endl;
+        } else if (!strcmp(argv[i], "-tcp_reno")) {
+            tcp_reno = true;
+            cout << "Using TCP NewReno (instead of Cubic)" << endl;
+        } else if (!strcmp(argv[i], "-ecn_kmin")) {
+            ecn_kmin_override = atoi(argv[i+1]);
+            i++;
+            cout << "ECN Kmin override: " << ecn_kmin_override << " bytes" << endl;
+        } else if (!strcmp(argv[i], "-ecn_kmax")) {
+            ecn_kmax_override = atoi(argv[i+1]);
+            i++;
+            cout << "ECN Kmax override: " << ecn_kmax_override << " bytes" << endl;
         } else {
             cout << "Unknown parameter: " << argv[i] << endl;
             exit_error(argv[0]);
@@ -272,6 +414,8 @@ int main(int argc, char **argv) {
 
     // Create topology
     FatTreeSwitch::set_strategy(FatTreeSwitch::ECMP);
+    FatTreeSwitch::_disable_trim = disable_trim;
+    CompositeQueue::_tail_drop = tail_drop;
 
     unique_ptr<FatTreeTopologyCfg> topo_cfg;
     if (topo_file) {
@@ -289,8 +433,8 @@ int main(int argc, char **argv) {
     // Enable ECN if requested
     if (enable_ecn) {
         mem_b queue_bytes = memFromPkt(queuesize_pkt);
-        mem_b ecn_low = queue_bytes / 4;
-        mem_b ecn_high = queue_bytes * 97 / 100;
+        mem_b ecn_low = (ecn_kmin_override > 0) ? ecn_kmin_override : queue_bytes / 4;
+        mem_b ecn_high = (ecn_kmax_override > 0) ? ecn_kmax_override : queue_bytes * 97 / 100;
         topo_cfg->set_ecn_parameters(true, true, ecn_low, ecn_high);
         cout << "ECN thresholds: low=" << ecn_low << " bytes, high=" << ecn_high << " bytes" << endl;
     }
@@ -301,13 +445,30 @@ int main(int argc, char **argv) {
     no_of_nodes = top->no_of_nodes();
     cout << "actual nodes " << no_of_nodes << endl;
 
-    // Calculate network RTT for NSCC initialization
-    simtime_picosec network_rtt = topo_cfg->get_diameter_latency() * 2;
-    cout << "Network RTT: " << timeAsUs(network_rtt) << " us" << endl;
+    // Calculate network diameter RTT (for reference only)
+    simtime_picosec diameter_rtt = topo_cfg->get_diameter_latency() * 2;
+    cout << "Network diameter RTT: " << timeAsUs(diameter_rtt) << " us" << endl;
 
-    // Initialize NSCC parameters
+    // Initialize NSCC parameters using first NSCC flow's actual path RTT
+    UecSrc::_maxwnd_multiplier = maxwnd_mult;
+    UecSrc::_delay_hysteresis_band = (simtime_picosec)(delay_hysteresis_us * 1000000.0);
+    UecSrc::_q3_pressure = q3_pressure;
+    UecSrc::_symmetric_delay_estimator = symmetric_delay;
     simtime_picosec target_Qdelay = timeFromUs(target_q_delay_us);
-    UecSrc::initNsccParams(network_rtt, linkspeed, target_Qdelay, qa_gate, true);
+    {
+        vector<connection*>* pre_conns = conns->getAllConnections();
+        uint32_t nscc_target_pre = (uint32_t)(pre_conns->size() * nscc_ratio);
+        // First NSCC flow is at index 0 (if nscc_target > 0)
+        if (nscc_target_pre > 0 && pre_conns->size() > 0) {
+            connection* first_nscc = pre_conns->at(0);
+            simtime_picosec flow_rtt = topo_cfg->get_two_point_diameter_latency(first_nscc->src, first_nscc->dst) * 2;
+            cout << "NSCC path RTT (src " << first_nscc->src << " -> dst " << first_nscc->dst << "): " << timeAsUs(flow_rtt) << " us" << endl;
+            UecSrc::initNsccParams(flow_rtt, linkspeed, target_Qdelay, qa_gate, !disable_trim);
+        } else {
+            // No NSCC flows, use diameter RTT as fallback
+            UecSrc::initNsccParams(diameter_rtt, linkspeed, target_Qdelay, qa_gate, !disable_trim);
+        }
+    }
 
     // Set up trace logger if requested
     unique_ptr<NsccTraceLogger> trace_logger;
@@ -340,8 +501,8 @@ int main(int argc, char **argv) {
     // Setup connections - split between NSCC and TCP Cubic
     vector<connection*>* all_conns = conns->getAllConnections();
 
-    vector<TcpCubicSrc*> cubic_srcs;
-    vector<TcpSink*> cubic_sinks;
+    vector<TcpSrc*> tcp_srcs;
+    vector<TcpSink*> tcp_sinks;
     vector<UecSrc*> nscc_srcs;
     vector<UecSink*> nscc_sinks;
     vector<FlowRecord> flow_records;
@@ -354,7 +515,7 @@ int main(int argc, char **argv) {
     uint32_t total_conns = all_conns->size();
     uint32_t nscc_target = (uint32_t)(total_conns * nscc_ratio);
 
-    cout << "Creating " << nscc_target << " NSCC flows and " << (total_conns - nscc_target) << " TCP Cubic flows" << endl;
+    cout << "Creating " << nscc_target << " NSCC flows and " << (total_conns - nscc_target) << " TCP " << (tcp_reno ? "Reno" : "Cubic") << " flows" << endl;
 
     for (size_t c = 0; c < all_conns->size(); c++) {
         connection* crt = all_conns->at(c);
@@ -402,8 +563,9 @@ int main(int argc, char **argv) {
                 uecSrc->setFlowsize((uint64_t)1e15);  // ~1 PB: won't complete, stays in signed mem_b range
             }
 
-            // Initialize NSCC congestion control
-            uecSrc->initNscc(0, network_rtt);
+            // Initialize per-flow NSCC using actual path RTT (not diameter RTT)
+            simtime_picosec flow_rtt = topo_cfg->get_two_point_diameter_latency(src, dest) * 2;
+            uecSrc->initNscc(0, flow_rtt);
 
             // Set up switch-based routing
             Route* srctotor = new Route();
@@ -427,7 +589,7 @@ int main(int argc, char **argv) {
             nscc_count++;
 
         } else {
-            rec.protocol = "CUBIC";
+            rec.protocol = tcp_reno ? "RENO" : "CUBIC";
 
             // Get paths through the SAME topology
             if (!net_paths[src][dest])
@@ -441,12 +603,25 @@ int main(int argc, char **argv) {
             Route* routeout = new Route(*(net_paths[src][dest]->at(choice)));
             Route* routein = new Route();
 
-            TcpCubicSrc* tcpSrc = new TcpCubicSrc(NULL, NULL, eventlist);
-            tcpSrc->setName("cubic_" + ntoa(src) + "_" + ntoa(dest));
+            TcpSrc* tcpSrc;
+            string prefix;
+            if (tcp_reno) {
+                tcpSrc = new TcpSrc(NULL, NULL, eventlist);
+                prefix = "reno_";
+            } else {
+                TcpCubicSrc* cubicSrc = new TcpCubicSrc(NULL, NULL, eventlist);
+                cubicSrc->setHystartEnabled(hystart_enabled);
+                cubicSrc->setFastConvergenceEnabled(fast_convergence);
+                cubicSrc->setTcpFriendlinessEnabled(true);
+                cubicSrc->setEcnEnabled(tcp_ecn_enabled);
+                tcpSrc = cubicSrc;
+                prefix = "cubic_";
+            }
+            tcpSrc->setName(prefix + ntoa(src) + "_" + ntoa(dest));
             logfile.writeName(*tcpSrc);
 
             TcpSink* tcpSnk = new TcpSink();
-            tcpSnk->setName("cubic_sink_" + ntoa(src) + "_" + ntoa(dest));
+            tcpSnk->setName(prefix + "sink_" + ntoa(src) + "_" + ntoa(dest));
             logfile.writeName(*tcpSnk);
 
             if (crt->size > 0) {
@@ -457,10 +632,6 @@ int main(int argc, char **argv) {
 
             tcpSrc->set_cwnd(cwnd_pkts * Packet::data_packet_size());
             tcpSrc->set_ssthresh(0xffffffff);
-            tcpSrc->setHystartEnabled(hystart_enabled);
-            tcpSrc->setFastConvergenceEnabled(fast_convergence);
-            tcpSrc->setTcpFriendlinessEnabled(true);
-            tcpSrc->setEcnEnabled(tcp_ecn_enabled);
 
             tcpRtxScanner.registerTcp(*tcpSrc);
 
@@ -471,8 +642,8 @@ int main(int argc, char **argv) {
 
             tcp_sink_logger->monitorSink(tcpSnk);
 
-            cubic_srcs.push_back(tcpSrc);
-            cubic_sinks.push_back(tcpSnk);
+            tcp_srcs.push_back(tcpSrc);
+            tcp_sinks.push_back(tcpSnk);
             cubic_count++;
         }
 
@@ -498,8 +669,57 @@ int main(int argc, char **argv) {
         }
     }
 
-    cout << "Created " << nscc_count << " NSCC flows and " << cubic_count << " TCP Cubic flows" << endl;
+    cout << "Created " << nscc_count << " NSCC flows and " << cubic_count << " TCP " << (tcp_reno ? "Reno" : "Cubic") << " flows" << endl;
     cout << "Both protocols share the SAME network queues - they will compete for bandwidth" << endl;
+
+    // Set up periodic time-series sampler if requested
+    unique_ptr<PeriodicSampler> sampler;
+    if (sample_file) {
+        if (flow_records.empty()) {
+            cerr << "Warning: -sample requested but no flows exist; skipping sampler" << endl;
+        } else {
+            // Bottleneck = ToR downlink to the first flow's destination node.
+            // NOTE: This assumes all flows share a single bottleneck (e.g. 2-to-1 incast).
+            // For multi-sink or multi-bottleneck workloads, this samples only one queue.
+            uint32_t sink_node = flow_records[0].dst;
+
+            // Check that all flows share the same destination (warn if not)
+            for (const auto& rec : flow_records) {
+                if ((uint32_t)rec.dst != sink_node) {
+                    cerr << "Warning: -sample bottleneck is ToR downlink to node " << sink_node
+                         << ", but flow " << rec.flow_id << " has dst=" << rec.dst
+                         << " — its bottleneck is NOT being sampled" << endl;
+                    break;
+                }
+            }
+
+            auto* bottleneck = dynamic_cast<CompositeQueue*>(
+                top->queues_nlp_ns[topo_cfg->HOST_POD_SWITCH(sink_node)][sink_node][0]);
+            assert(bottleneck && "Bottleneck queue must be a CompositeQueue");
+            cout << "Sampling bottleneck queue: " << bottleneck->nodename()
+                 << " (ToR downlink to node " << sink_node << ")" << endl;
+
+            // Compute ECN thresholds and BDP for metadata
+            mem_b ecn_kmin = 0, ecn_kmax = 0;
+            if (enable_ecn) {
+                mem_b queue_bytes = memFromPkt(queuesize_pkt);
+                ecn_kmin = (ecn_kmin_override > 0) ? ecn_kmin_override : queue_bytes / 4;
+                ecn_kmax = (ecn_kmax_override > 0) ? ecn_kmax_override : queue_bytes * 97 / 100;
+            }
+            simtime_picosec flow_rtt = topo_cfg->get_two_point_diameter_latency(
+                flow_records[0].src, flow_records[0].dst) * 2;
+            mem_b bdp = (mem_b)(timeAsSec(flow_rtt) * (double)linkspeed / 8.0);
+            double linkspeed_gbps = (double)linkspeed / 1e9;
+
+            simtime_picosec sample_interval = timeFromUs((uint32_t)1); // 1us
+            sampler = make_unique<PeriodicSampler>(eventlist, sample_interval, string(sample_file),
+                                                    tcp_srcs, tcp_sinks,
+                                                    nscc_srcs, nscc_sinks, bottleneck,
+                                                    ecn_kmin, ecn_kmax, bdp, linkspeed_gbps,
+                                                    tcp_ecn_enabled);
+            cout << "Time-series sampling at 1us intervals to " << sample_file << endl;
+        }
+    }
 
     // Record setup
     int pktsize = Packet::data_packet_size();
@@ -535,9 +755,9 @@ int main(int argc, char **argv) {
             // finish_time already set by FlowFinishTracker via end_trigger
             nscc_idx++;
         } else {
-            TcpCubicSrc* src_ptr = cubic_srcs[cubic_idx];
-            TcpSink* snk_ptr = cubic_sinks[cubic_idx];
-            rec.bytes_received = snk_ptr->cumulative_ack();
+            TcpSrc* src_ptr = tcp_srcs[cubic_idx];
+            TcpSink* snk_ptr = tcp_sinks[cubic_idx];
+            rec.bytes_received = snk_ptr->total_received();
             rec.finished = (src_ptr->_last_acked >= src_ptr->_flow_size && src_ptr->_flow_size > 0);
             rec.retransmits = src_ptr->_drops;
             rec.finish_time = src_ptr->_finish_time;
@@ -626,14 +846,15 @@ int main(int argc, char **argv) {
              << endl;
     }
 
-    // TCP Cubic statistics
-    cout << "\n=== TCP Cubic Statistics ===" << endl;
+    // TCP statistics
+    string tcp_name = tcp_reno ? "TCP Reno" : "TCP Cubic";
+    cout << "\n=== " << tcp_name << " Statistics ===" << endl;
     uint64_t cubic_total_bytes = 0;
     uint64_t cubic_retx = 0;
     uint32_t cubic_finished = 0;
     vector<double> cubic_throughputs;
     for (auto& rec : flow_records) {
-        if (rec.protocol != "CUBIC") continue;
+        if (rec.protocol == "NSCC") continue;
         cubic_total_bytes += rec.bytes_received;
         cubic_retx += rec.retransmits;
         if (rec.finished) cubic_finished++;
@@ -645,13 +866,13 @@ int main(int argc, char **argv) {
             }
         }
     }
-    cout << "TCP Cubic flows completed: " << cubic_finished << "/" << cubic_count << endl;
-    cout << "TCP Cubic total bytes received: " << cubic_total_bytes << endl;
-    cout << "TCP Cubic retransmits: " << cubic_retx << endl;
+    cout << tcp_name << " flows completed: " << cubic_finished << "/" << cubic_count << endl;
+    cout << tcp_name << " total bytes received: " << cubic_total_bytes << endl;
+    cout << tcp_name << " retransmits: " << cubic_retx << endl;
     if (!cubic_throughputs.empty()) {
         sort(cubic_throughputs.begin(), cubic_throughputs.end());
         double sum = accumulate(cubic_throughputs.begin(), cubic_throughputs.end(), 0.0);
-        cout << "TCP Cubic per-flow throughput (Gbps): mean=" << sum / cubic_throughputs.size()
+        cout << tcp_name << " per-flow throughput (Gbps): mean=" << sum / cubic_throughputs.size()
              << " median=" << cubic_throughputs[cubic_throughputs.size()/2]
              << " p99=" << cubic_throughputs[(size_t)(cubic_throughputs.size() * 0.99)]
              << endl;
@@ -758,8 +979,8 @@ int main(int argc, char **argv) {
             };
 
             if (nscc_finished_first && !cubic_finished_first) {
-                // NSCC finished first, Cubic ran solo in Phase 2.
-                uint64_t phase2_solo_bytes = estimate_phase2_bytes("CUBIC");
+                // NSCC finished first, TCP ran solo in Phase 2.
+                uint64_t phase2_solo_bytes = estimate_phase2_bytes(tcp_reno ? "RENO" : "CUBIC");
                 cubic_phase1_bytes = (int64_t)cubic_total_bytes - (int64_t)phase2_solo_bytes;
                 if (cubic_phase1_bytes < 0) cubic_phase1_bytes = 0;
                 cout << "NSCC finished first. Cubic ran solo for " << phase2_us << " us" << endl;

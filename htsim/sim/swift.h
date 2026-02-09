@@ -171,6 +171,7 @@ public:
     uint64_t _highest_dsn_sent;  //seqno is in bytes - data sequence number, for MPSwift
     uint64_t _flow_size;
     simtime_picosec _stop_time;
+    simtime_picosec _finish_time;  // 0 = not finished
     bool _stopped;
     uint32_t _maxcwnd;
     int32_t _app_limited;

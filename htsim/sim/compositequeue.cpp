@@ -7,6 +7,7 @@
 
 static int global_queue_id=0;
 #define DEBUG_QUEUE_ID -1 // set to queue ID to enable debugging
+bool CompositeQueue::_tail_drop = false;
 
 CompositeQueue::CompositeQueue(linkspeed_bps bitrate, mem_b maxsize, EventList& eventlist, 
                                QueueLogger* logger, uint16_t trim_size, bool disable_trim)
@@ -159,7 +160,7 @@ void CompositeQueue::receivePacket(Packet& pkt)
     if (_logger) _logger->logQueue(*this, QueueLogger::PKT_ARRIVE, pkt);
 
     if (!pkt.header_only()){
-        if (_queuesize_low+pkt.size() <= _maxsize  || drand()<0.5) {
+        if (_queuesize_low+pkt.size() <= _maxsize  || (!_tail_drop && drand()<0.5)) {
             //regular packet; don't drop the arriving packet
 
             // we are here because either the queue isn't full or,

@@ -44,6 +44,7 @@ TcpSrc::TcpSrc(TcpLogger* logger, TrafficLogger* pktlogger,
     _mdev = 0;
     _recoverq = 0;
     _in_fast_recovery = false;
+    _fr_last_retransmit = 0;
     _mSrc = NULL;
     _drops = 0;
 
@@ -263,25 +264,32 @@ TcpSrc::receivePacket(Packet& pkt)
         else 
             _cwnd = 0;
         _cwnd += _mss;
-        if (_logger) 
+        if (_logger)
             _logger->logTcp(*this, TcpLogger::TCP_RCV_FR);
         retransmit_packet();
+        _fr_last_retransmit = eventlist().now();
         send_packets();
         return;
     }
     // It's a dup ack
-    if (_in_fast_recovery) { // still in fast recovery; hopefully the prodigal ACK is on it's way 
+    if (_in_fast_recovery) { // still in fast recovery; hopefully the prodigal ACK is on it's way
         _cwnd += _mss;
         if (_cwnd>_maxcwnd) {
             _cwnd = _maxcwnd;
         }
+        // FR rescue retransmit: re-retransmit the lost packet every RTT
+        // to avoid deadlock when the initial FR retransmit was dropped
+        if (_rtt > 0 && eventlist().now() - _fr_last_retransmit >= _rtt) {
+            retransmit_packet();
+            _fr_last_retransmit = eventlist().now();
+        }
         // When we restart, the window will be set to
         // min(_ssthresh, flightsize+_mss), so keep track of
         // this
-        _unacked = min(_ssthresh, (uint32_t)(_highest_sent-_recoverq+_mss)); 
-        if (_last_acked+_cwnd >= _highest_sent+_mss) 
+        _unacked = min(_ssthresh, (uint32_t)(_highest_sent-_recoverq+_mss));
+        if (_last_acked+_cwnd >= _highest_sent+_mss)
             _effcwnd=_unacked; // starting to send packets again
-        if (_logger) 
+        if (_logger)
             _logger->logTcp(*this, TcpLogger::TCP_RCV_DUP_FR);
         send_packets();
         return;
@@ -325,6 +333,7 @@ TcpSrc::receivePacket(Packet& pkt)
     _rtt_cum = timeFromMs(0);
   
     retransmit_packet();
+    _fr_last_retransmit = eventlist().now();
     _cwnd = _ssthresh + 3 * _mss;
     _unacked = _ssthresh;
     _effcwnd = 0;

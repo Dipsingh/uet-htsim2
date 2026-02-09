@@ -63,6 +63,7 @@ class CompositeQueue : public Queue {
     int _num_stripped; // count of packets we stripped
     int _num_bounced;  // count of packets we bounced
     mem_b _queuesize_high_watermark; // max occupancy of high priority queue
+    static bool _tail_drop;  // When true, always drop arriving packet when queue is full (no random replacement)
 
  protected:
     // Mechanism

@@ -1,0 +1,806 @@
+topology file: topologies/incast_2to1_8us.topo
+traffic matrix file: connection_matrices/incast_2to1_single_switch.cm
+queue size 100 packets
+end_time 200000 us
+random seed 13
+NSCC ratio 0.5
+ECN enabled
+TCP Cubic ECN response disabled
+NSCC target queue delay 12 us
+Trimming disabled, dropping instead.
+NSCC delay hysteresis band +/-1 us
+NSCC Q3 pressure 0.01 per RTT
+NSCC symmetric delay estimator enabled
+CSV output: results/review_ecn_nscc_highq/nscc_8us_qd12_coex.csv
+Time-series sampling: results/review_ecn_nscc_highq/nscc_8us_qd12_coex_timeseries.csv
+Logging to logout.dat
+Loading connection matrix from connection_matrices/incast_2to1_single_switch.cm
+Nodes: 4 Connections: 2 Triggers: 0 Failures: 0
+Using 4 nodes
+Topology load done
+Fat Tree topology (0) with 2us Src-ToR links, 2us ToR-Agg links, 0us ToR switch latency, 0us Agg switch latency for 8us diameter latency.
+no_of_tor_uplinks: 1
+No of nodes: 4
+No of pods: 1
+Hosts per pod: 4
+Hosts per pod: 4
+ToR switches per pod: 1
+Agg switches per pod: 1
+No of core switches: 0
+FatTreeCfg constructor done.
+Tier 0 QueueSize Down 150000 bytes
+Tier 0 QueueSize Up 150000 bytes
+Tier 1 QueueSize Down 150000 bytes
+Tier 1 QueueSize Up 150000 bytes
+Tier 2 QueueSize Down 150000 bytes
+ECN thresholds: low=37500 bytes, high=145500 bytes
+FatTreeTopologyCfg NCORE=0 NAGG=1 NTOR=1 NSRV=4 NPOD=1 tor_switches_per_pod=1 agg_switches_per_pod=1 tiers=2 host_per_pod=4 enabled_ecn=1 enable_ecn_on_tor_downlink=1 ecn_low=37500 ecn_high=145500 num_failed_links=0 failed_link_ratio=0.25 no_of_nodes=4 hop_latency=0 switch_latency=0 diameter_latency=8000000 diameter=4 tier=0 link_latency=2000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=4 radix_down=4 queue_down=150000 radix_up=1 queue_up=150000 tier=1 link_latency=2000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=1 queue_down=150000 radix_up=0 queue_up=150000
+queue_id 2 ecn_low 37500 ecn_high 145500
+actual nodes 4
+Network diameter RTT: 16 us
+NSCC path RTT (src 1 -> dst 0): 8 us
+Initializing static NSCC parameters: _reference_network_linkspeed=100000000000 _reference_network_rtt=12000000 _reference_network_bdp=150000 _target_Qdelay=12000000 _network_linkspeed=100000000000 _network_rtt=8000000 _network_bdp=100000 _qa_gate=2^2 _qa_threshold=4.8e+07 _scaling_factor_a=0.666667 _scaling_factor_b=1 _alpha=0.000910222 _fi=13653.3 _eta=409.6 _qa_scaling=1 _gamma=0.8 _fi_scale=0.166667 _delay_alpha=0.0125 _adjust_period_threshold=8000000 _adjust_bytes_threshold=33280 _target_Qdelay_lo=11000000 _target_Qdelay_hi=13000000 _q3_pressure=0.01 _symmetric_delay=1
+Creating 1 NSCC flows and 1 TCP Cubic flows
+Initialize per-instance NSCC parameters: flowid 1000000001 _base_rtt=8000000 _base_bdp=100000 _bdp=100000 _min_cwnd=4160 _maxwnd=150000 _cwnd=150000
+Setting flow size to 9223372036854777307
+Created 1 NSCC flows and 1 TCP Cubic flows
+Both protocols share the SAME network queues - they will compete for bandwidth
+Sampling bottleneck queue: compqueue(100000Mb/s,150000bytes)LS0->DST0(0) (ToR downlink to node 0)
+Time-series sampling at 1us intervals to results/review_ecn_nscc_highq/nscc_8us_qd12_coex_timeseries.csv
+Starting simulation
+Flow nscc_1_0 flowId 1000000001 uecSrc 0 starting at 0
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+2681.02 flowid 1000000001 Spurious 7387
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+8696.96 flowid 1000000001 Spurious 21139
+8701.64 flowid 1000000001 Spurious 21150
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+21144.7 flowid 1000000001 Spurious 49897
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+36736.8 flowid 1000000001 Spurious 86045
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+72792.9 flowid 1000000001 Spurious 169918
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+77417.6 flowid 1000000001 Spurious 180255
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+85652.7 flowid 1000000001 Spurious 199626
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+101854 flowid 1000000001 Spurious 237165
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+117431 flowid 1000000001 Spurious 273524
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+122522 flowid 1000000001 Spurious 285015
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+124352 flowid 1000000001 Spurious 289143
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+140662 flowid 1000000001 Spurious 326497
+A [ 99 0 ] DROP  flowid 1000000003
+141118 flowid 1000000001 Spurious 327561
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+146664 flowid 1000000001 Spurious 340262
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+156739 flowid 1000000001 Spurious 363921
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+160926 flowid 1000000001 Spurious 373663
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+169647 flowid 1000000001 Spurious 394061
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+192830 flowid 1000000001 Spurious 447248
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+199642 flowid 1000000001 Spurious 463186
+A [ 99 0 ] DROP  flowid 1000000003
+A [ 99 0 ] DROP  flowid 1000000003
+Done at 200000 us
+CSV results written to results/review_ecn_nscc_highq/nscc_8us_qd12_coex.csv
+
+========================================
+INTER-PROTOCOL FAIRNESS RESULTS
+========================================
+
+=== NSCC Statistics ===
+NSCC flows completed: 0/1
+NSCC total bytes received (unique): 665798528
+NSCC per-flow throughput (Gbps): mean=26.6319 median=26.6319 p99=26.6319
+
+=== TCP Cubic Statistics ===
+TCP Cubic flows completed: 0/1
+TCP Cubic total bytes received: 1804389001
+TCP Cubic retransmits: 434
+TCP Cubic per-flow throughput (Gbps): mean=72.1756 median=72.1756 p99=72.1756
+
+=== Competitive Fairness Analysis ===
+Mode: STEADY-STATE (all flows active for entire simulation)
+Measurement window: 0 - 200000 us (200000 us)
+NSCC:  665798528 bytes, 26.6319 Gbps, share=26.9534%
+Cubic: 1804389001 bytes, 72.1756 Gbps, share=73.0466%
+Competitive JFI: 0.82477
+
+=== Raw Bandwidth Share (total bytes, for reference) ===
+NSCC:  26.9534%
+Cubic: 73.0466%
+
+=== Jain's Fairness Index (per-flow) ===
+Jain's Fairness Index (all flows): 0.82477

@@ -1,0 +1,239 @@
+topology file: htsim/sim/datacenter/topologies/leaf_spine_128_1to1.topo
+traffic matrix file: htsim/sim/datacenter/connection_matrices/incast_2to1_size500MB.cm
+queue size 100 packets
+end_time 500000 us
+random seed 13
+Swift ratio 0.5
+Swift initial cwnd 15 packets
+TCP Cubic initial cwnd 10 packets
+TCP Cubic HyStart enabled
+TCP Cubic fast convergence enabled
+ECN enabled
+TCP Cubic ECN response enabled
+CSV output: htsim/sim/datacenter/results/review_ecn_swift/swift_500mb_tcpEcnOn.csv
+Logging to htsim/sim/datacenter/results/review_ecn_swift/swift_500mb_tcpEcnOn.dat
+Loading connection matrix from htsim/sim/datacenter/connection_matrices/incast_2to1_size500MB.cm
+Nodes: 128 Connections: 2 Triggers: 0 Failures: 0
+Using 128 nodes
+Topology load done
+Fat Tree topology (0) with 1us Src-ToR links, 1us ToR-Agg links, 0us ToR switch latency, 0us Agg switch latency for 4us diameter latency.
+no_of_tor_uplinks: 128
+No of nodes: 128
+No of pods: 1
+Hosts per pod: 128
+Hosts per pod: 128
+ToR switches per pod: 8
+Agg switches per pod: 16
+No of core switches: 0
+FatTreeCfg constructor done.
+Tier 0 QueueSize Down 150000 bytes
+Tier 0 QueueSize Up 150000 bytes
+Tier 1 QueueSize Down 150000 bytes
+Tier 1 QueueSize Up 150000 bytes
+Tier 2 QueueSize Down 150000 bytes
+ECN thresholds: low=37500 bytes, high=145500 bytes
+FatTreeTopologyCfg NCORE=0 NAGG=16 NTOR=8 NSRV=128 NPOD=1 tor_switches_per_pod=8 agg_switches_per_pod=16 tiers=2 host_per_pod=128 enabled_ecn=1 enable_ecn_on_tor_downlink=1 ecn_low=37500 ecn_high=145500 num_failed_links=0 failed_link_ratio=0.25 no_of_nodes=128 hop_latency=0 switch_latency=0 diameter_latency=4000000 diameter=4 tier=0 link_latency=1000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=16 queue_down=150000 radix_up=16 queue_up=150000 tier=1 link_latency=1000000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=8 queue_down=150000 radix_up=0 queue_up=150000
+queue_id 2 ecn_low 37500 ecn_high 145500
+actual nodes 128
+Creating 1 Swift flows and 1 TCP Cubic flows
+pathcount 16
+pathcount 16
+Setting flow size to 524289500
+pathcount 16
+pathcount 16
+Setting flow size to 524289500
+subflow src constructor
+connect, flow id is now 1596
+Created 1 Swift flows and 1 TCP Cubic flows
+Both protocols share the SAME network queues - they will compete for bandwidth
+Starting simulation
+97.9341 swift_subsrc1594_0 retransmit_packet 
+99.4992 swift_subsrc1594_0 retransmit_packet 
+100.344 swift_subsrc1594_0 retransmit_packet 
+101.189 swift_subsrc1594_0 retransmit_packet 
+101.915 swift_subsrc1594_0 retransmit_packet 
+102.52 swift_subsrc1594_0 retransmit_packet 
+103.24 swift_subsrc1594_0 retransmit_packet 
+103.72 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+104.08 swift_subsrc1594_0 retransmit_packet 
+104.8 swift_subsrc1594_0 retransmit_packet 
+104.92 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+105.64 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+107.325 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+108.175 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+Spurious retransmit received!
+110.751 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+113.197 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+Spurious retransmit received!
+Spurious retransmit received!
+Spurious retransmit received!
+120.135 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+Spurious retransmit received!
+120.975 swift_subsrc1594_0 retransmit_packet 
+121.095 swift_subsrc1594_0 retransmit_packet 
+121.82 swift_subsrc1594_0 retransmit_packet 
+121.94 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+123.14 swift_subsrc1594_0 retransmit_packet 
+123.86 swift_subsrc1594_0 retransmit_packet 
+124.34 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+125.54 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+126.26 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+128.3 swift_subsrc1594_0 retransmit_packet 
+128.665 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+129.995 swift_subsrc1594_0 retransmit_packet 
+132.822 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+Spurious retransmit received!
+Spurious retransmit received!
+Spurious retransmit received!
+Spurious retransmit received!
+hit inflate limit
+Spurious retransmit received!
+hit inflate limit
+hit inflate limit
+hit inflate limit
+hit inflate limit
+Spurious retransmit received!
+Spurious retransmit received!
+hit inflate limit
+hit inflate limit
+hit inflate limit
+Spurious retransmit received!
+142.049 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+142.889 swift_subsrc1594_0 retransmit_packet 
+143.729 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+144.689 swift_subsrc1594_0 retransmit_packet 
+146.369 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+148.769 swift_subsrc1594_0 retransmit_packet 
+148.889 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+Spurious retransmit received!
+150.449 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+153.115 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+Spurious retransmit received!
+Spurious retransmit received!
+Spurious retransmit received!
+hit inflate limit
+hit inflate limit
+Spurious retransmit received!
+hit inflate limit
+hit inflate limit
+166.861 swift_subsrc1594_0 retransmit_packet 
+166.981 swift_subsrc1594_0 retransmit_packet 
+167.101 swift_subsrc1594_0 retransmit_packet 
+169.267 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+Spurious retransmit received!
+Spurious retransmit received!
+175.397 swift_subsrc1594_0 retransmit_packet 
+hit inflate limit
+177.833 swift_subsrc1594_0 retransmit_packet 
+hit inflate limit
+Spurious retransmit received!
+Spurious retransmit received!
+Spurious retransmit received!
+187.943 swift_subsrc1594_0 retransmit_packet 
+Spurious retransmit received!
+Spurious retransmit received!
+196.359 swift_subsrc1594_0 retransmit_packet 
+hit inflate limit
+hit inflate limit
+hit inflate limit
+204.774 swift_subsrc1594_0 retransmit_packet 
+213.195 swift_subsrc1594_0 retransmit_packet 
+hit inflate limit
+hit inflate limit
+hit inflate limit
+hit inflate limit
+hit inflate limit
+221.605 swift_subsrc1594_0 retransmit_packet 
+hit inflate limit
+230.015 swift_subsrc1594_0 retransmit_packet 
+238.425 swift_subsrc1594_0 retransmit_packet 
+246.83 swift_subsrc1594_0 retransmit_packet 
+255.236 swift_subsrc1594_0 retransmit_packet 
+263.646 swift_subsrc1594_0 retransmit_packet 
+hit inflate limit
+272.056 swift_subsrc1594_0 retransmit_packet 
+hit inflate limit
+hit inflate limit
+292.346 swift_subsrc1594_0 retransmit_packet 
+312.631 swift_subsrc1594_0 retransmit_packet 
+321.036 swift_subsrc1594_0 retransmit_packet 
+329.442 swift_subsrc1594_0 retransmit_packet 
+349.727 swift_subsrc1594_0 retransmit_packet 
+370.017 swift_subsrc1594_0 retransmit_packet 
+hit inflate limit
+10000 swift_subsrc1594_0 At 10 RTO 0 MDEV 0 RTT 0 SEQ 207 HSENT 328500 CWND 3 FAST RECOVERY? 0 Flow ID swift_subflow_src
+10002.5 swift_subsrc1594_0 retransmit_packet 
+20000 swift_subsrc1594_0 At 20 RTO 0 MDEV 0 RTT 0 SEQ 207 HSENT 312768 CWND 1 FAST RECOVERY? 0 Flow ID swift_subflow_src
+20000.6 swift_subsrc1594_0 retransmit_packet 
+30000 swift_subsrc1594_0 At 30 RTO 0 MDEV 0 RTT 0 SEQ 208 HSENT 314332 CWND 1 FAST RECOVERY? 0 Flow ID swift_subflow_src
+30000.6 swift_subsrc1594_0 retransmit_packet 
+40000 swift_subsrc1594_0 At 40 RTO 0 MDEV 0 RTT 0 SEQ 209 HSENT 315896 CWND 1 FAST RECOVERY? 0 Flow ID swift_subflow_src
+40000.6 swift_subsrc1594_0 retransmit_packet 
+Flow tcpsrc finished at 41.9684
+50000 swift_subsrc1594_0 At 50 RTO 0 MDEV 0 RTT 0 SEQ 209 HSENT 315960 CWND 1 FAST RECOVERY? 0 Flow ID swift_subflow_src
+50000.5 swift_subsrc1594_0 retransmit_packet 
+Done at 490000 us
+CSV results written to htsim/sim/datacenter/results/review_ecn_swift/swift_500mb_tcpEcnOn.csv
+
+========================================
+INTER-PROTOCOL FAIRNESS RESULTS
+========================================
+
+=== Swift Statistics ===
+Swift flows completed: 0/1
+Swift total bytes received: 303064
+Swift retransmits: 6
+Swift per-flow throughput (Gbps): mean=0.00494798 median=0.00494798 p99=0.00494798
+
+=== TCP Cubic Statistics ===
+TCP Cubic flows completed: 1/1
+TCP Cubic total bytes received: 524290501
+TCP Cubic retransmits: 0
+TCP Cubic per-flow throughput (Gbps): mean=99.9401 median=99.9401 p99=99.9401
+
+=== Competitive Fairness Analysis ===
+Mode: PHASE ANALYSIS (at least one flow completed)
+Phase 1 (overlap): 0 - 41968.4 us (41968.4 us)
+Phase 2 (solo):    41968.4 - 41968.4 us (0 us)
+Cubic finished first. Swift ran solo for 0 us
+Estimated Swift solo bytes (Phase 2): 0
+
+Competitive throughput (Phase 1 only):
+  Swift: 303064 bytes, 0.05777 Gbps
+  Cubic: 524290501 bytes, 99.9401 Gbps
+
+Competitive bandwidth share:
+  Swift: 0.0577712%
+  Cubic: 99.9422%
+Competitive JFI: 0.500578
+
+=== Raw Bandwidth Share (total bytes, for reference) ===
+Swift: 0.0577712%
+Cubic: 99.9422%
+
+=== Jain's Fairness Index (per-flow) ===
+Jain's Fairness Index (all flows): 0.50005
+
+=== Swift Protocol Details ===
+  swift_65_0 drops=6 dsn_sent=524289000

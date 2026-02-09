@@ -1,0 +1,74 @@
+topology file: topologies/incast_2to1.topo
+traffic matrix file: connection_matrices/incast_2to1_single_switch.cm
+queue size 100 packets
+end_time 200000 us
+random seed 13
+NSCC ratio 0.5
+ECN enabled
+TCP Cubic ECN response disabled
+NSCC target queue delay 16 us
+CSV output: results/review_ecn_nscc_highq/nscc_incast_qd16_qg2_tcpEcnOff.csv
+Logging to logout.dat
+Loading connection matrix from connection_matrices/incast_2to1_single_switch.cm
+Nodes: 4 Connections: 2 Triggers: 0 Failures: 0
+Using 4 nodes
+Topology load done
+Fat Tree topology (0) with 0.5us Src-ToR links, 0.5us ToR-Agg links, 0us ToR switch latency, 0us Agg switch latency for 2us diameter latency.
+no_of_tor_uplinks: 1
+No of nodes: 4
+No of pods: 1
+Hosts per pod: 4
+Hosts per pod: 4
+ToR switches per pod: 1
+Agg switches per pod: 1
+No of core switches: 0
+FatTreeCfg constructor done.
+Tier 0 QueueSize Down 150000 bytes
+Tier 0 QueueSize Up 150000 bytes
+Tier 1 QueueSize Down 150000 bytes
+Tier 1 QueueSize Up 150000 bytes
+Tier 2 QueueSize Down 150000 bytes
+ECN thresholds: low=37500 bytes, high=145500 bytes
+FatTreeTopologyCfg NCORE=0 NAGG=1 NTOR=1 NSRV=4 NPOD=1 tor_switches_per_pod=1 agg_switches_per_pod=1 tiers=2 host_per_pod=4 enabled_ecn=1 enable_ecn_on_tor_downlink=1 ecn_low=37500 ecn_high=145500 num_failed_links=0 failed_link_ratio=0.25 no_of_nodes=4 hop_latency=0 switch_latency=0 diameter_latency=2000000 diameter=4 tier=0 link_latency=500000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=4 radix_down=4 queue_down=150000 radix_up=1 queue_up=150000 tier=1 link_latency=500000 switch_latencies=0 bundlesize=1 downlink_speeds=100000000000 oversub=1 radix_down=1 queue_down=150000 radix_up=0 queue_up=150000
+queue_id 2 ecn_low 37500 ecn_high 145500
+actual nodes 4
+Network RTT: 4 us
+Initializing static NSCC parameters: _reference_network_linkspeed=100000000000 _reference_network_rtt=12000000 _reference_network_bdp=150000 _target_Qdelay=16000000 _network_linkspeed=100000000000 _network_rtt=4000000 _network_bdp=50000 _qa_gate=2^2 _qa_threshold=6.4e+07 _scaling_factor_a=0.333333 _scaling_factor_b=1.33333 _alpha=0.000455111 _fi=6826.67 _eta=204.8 _qa_scaling=1 _gamma=0.8 _fi_scale=0.0833333 _delay_alpha=0.0125 _adjust_period_threshold=4000000 _adjust_bytes_threshold=33280
+Creating 1 NSCC flows and 1 TCP Cubic flows
+Initialize per-instance NSCC parameters: flowid 1000000001 _base_rtt=4000000 _base_bdp=50000 _bdp=50000 _min_cwnd=4160 _maxwnd=75000 _cwnd=75000
+Setting flow size to 9223372036854777307
+Created 1 NSCC flows and 1 TCP Cubic flows
+Both protocols share the SAME network queues - they will compete for bandwidth
+Starting simulation
+Flow nscc_1_0 flowId 1000000001 uecSrc 0 starting at 0
+Done at 200000 us
+CSV results written to results/review_ecn_nscc_highq/nscc_incast_qd16_qg2_tcpEcnOff.csv
+
+========================================
+INTER-PROTOCOL FAIRNESS RESULTS
+========================================
+
+=== NSCC Statistics ===
+NSCC flows completed: 0/1
+NSCC total bytes received (unique): 41434344
+NSCC per-flow throughput (Gbps): mean=1.65737 median=1.65737 p99=1.65737
+
+=== TCP Cubic Statistics ===
+TCP Cubic flows completed: 0/1
+TCP Cubic total bytes received: 1552557641
+TCP Cubic retransmits: 67
+TCP Cubic per-flow throughput (Gbps): mean=62.1023 median=62.1023 p99=62.1023
+
+=== Competitive Fairness Analysis ===
+Mode: STEADY-STATE (all flows active for entire simulation)
+Measurement window: 0 - 200000 us (200000 us)
+NSCC:  41434344 bytes, 1.65737 Gbps, share=2.59941%
+Cubic: 1552557641 bytes, 62.1023 Gbps, share=97.4006%
+Competitive JFI: 0.526669
+
+=== Raw Bandwidth Share (total bytes, for reference) ===
+NSCC:  2.59941%
+Cubic: 97.4006%
+
+=== Jain's Fairness Index (per-flow) ===
+Jain's Fairness Index (all flows): 0.526669

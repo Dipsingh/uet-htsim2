@@ -597,6 +597,7 @@ SwiftSrc::SwiftSrc(SwiftRtxTimerScanner& rtx_scanner, SwiftLogger* logger, Traff
     _maxcwnd = 0xffffffff;//200*_mss;
     _flow_size = ((uint64_t)1)<<63;
     _stop_time = 0;
+    _finish_time = 0;
     _stopped = false;
     _app_limited = -1;
     _highest_dsn_sent = 0;
@@ -796,7 +797,10 @@ SwiftSrc::targetDelay(uint32_t cwnd, const Route& route) {
 void SwiftSrc::update_dsn_ack(SwiftAck::seq_t ds_ackno) {
     //cout << "Flow " << _name << " dsn ack " << ds_ackno << endl;
     if (ds_ackno >= _flow_size){
-        cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << ds_ackno << endl;
+        if (_finish_time == 0) {
+            _finish_time = eventlist().now();
+            cout << "Flow " << _name << " finished at " << timeAsUs(eventlist().now()) << " total bytes " << ds_ackno << endl;
+        }
     }
 }
 

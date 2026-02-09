@@ -393,7 +393,8 @@ void TcpCubicSrc::deflate_window()
     // the network has become more congested, so be more conservative
     if (_fast_convergence && _cwnd < _last_max_cwnd) {
         // Further reduce last_max by beta
-        _last_max_cwnd = (_cwnd * (BICTCP_BETA_SCALE + BETA)) / (2 * BICTCP_BETA_SCALE);
+        // Use uint64_t to avoid overflow when _cwnd > ~6 MB
+        _last_max_cwnd = (uint32_t)(((uint64_t)_cwnd * (BICTCP_BETA_SCALE + BETA)) / (2 * BICTCP_BETA_SCALE));
     } else {
         _last_max_cwnd = _cwnd;
     }
@@ -401,7 +402,8 @@ void TcpCubicSrc::deflate_window()
     // Multiplicative decrease: ssthresh = cwnd * beta
     // beta = 0.7 (717/1024)
     if (_mSrc == NULL) {
-        _ssthresh = max((_cwnd * BETA) / BICTCP_BETA_SCALE, (uint32_t)(2 * _mss));
+        // Use uint64_t to avoid overflow when _cwnd > ~6 MB
+        _ssthresh = max((uint32_t)(((uint64_t)_cwnd * BETA) / BICTCP_BETA_SCALE), (uint32_t)(2 * _mss));
     } else {
         _ssthresh = _mSrc->deflate_window(_cwnd, _mss);
     }

@@ -171,6 +171,8 @@ public:
         //_maxwnd = cwnd;
         _cwnd = cwnd;
     }
+    mem_b cwnd() const { return _cwnd; }
+    mem_b in_flight() const { return _in_flight; }
     void setMaxWnd(mem_b maxwnd) {
         //_maxwnd = cwnd;
         _maxwnd = maxwnd;
@@ -183,7 +185,7 @@ public:
     void boundBaseRTT(simtime_picosec network_rtt){
         _base_rtt = network_rtt;
         _bdp = timeAsUs(_base_rtt) * _nic.linkspeed() / 8000000;
-        _maxwnd =  1.5*_bdp;
+        _maxwnd =  _maxwnd_multiplier*_bdp;
         _configured_maxwnd = _maxwnd;
 
         if (!_shown){
@@ -239,8 +241,24 @@ public:
 
     // Trace logger for time-series CSV output (Phase 2)
     static NsccTraceLogger* _trace_logger;
+    static double _maxwnd_multiplier;  // maxwnd = multiplier * BDP (default 1.5)
+
+    // Coexistence improvements (all disabled by default to preserve original behavior)
+    static simtime_picosec _delay_hysteresis_band;  // half-band for delay hysteresis (0 = disabled)
+    static simtime_picosec _target_Qdelay_lo;       // target - band (Q1/Q3 threshold)
+    static simtime_picosec _target_Qdelay_hi;       // target + band (Q0/Q2 threshold)
+    static double _q3_pressure;                     // per-RTT decay fraction in Q3 (0 = disabled)
+    static bool _symmetric_delay_estimator;          // symmetric EWMA in update_delay (false = original)
     static void setTraceLogger(NsccTraceLogger* logger) { _trace_logger = logger; }
     uint8_t _last_quadrant = 0;
+
+    // Cumulative quadrant event counters for diagnostics
+    uint64_t _q0_count = 0;  // Q0: !skip && delay >= target (fair_increase)
+    uint64_t _q1_count = 0;  // Q1: !skip && delay <  target (proportional_increase)
+    uint64_t _q2_count = 0;  // Q2:  skip && delay >= target (multiplicative_decrease)
+    uint64_t _q3_count = 0;  // Q3:  skip && delay <  target (noop)
+    uint64_t _qa_count = 0;  // QA: quick_adapt fired
+    uint64_t _q4_count = 0;  // Q4: neutral zone (hysteresis band)
 
    private:
     unique_ptr<UecMultipath> _mp;
@@ -423,6 +441,7 @@ private:
     simtime_picosec _last_adjust_time = 0;
     bool _increase = false;
     simtime_picosec _last_dec_time = 0;
+    simtime_picosec _last_q3_pressure_time = 0;
     uint32_t _highest_recv_seqno;
 
     /******** SLEEK parameters *********/
